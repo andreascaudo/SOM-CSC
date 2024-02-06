@@ -3,5 +3,3 @@ altair
 pandas
 numpy
 MiniSom
-time
-math
