@@ -67,7 +67,7 @@ else:
     learning_rate = st.sidebar.slider('Learning rate', 0.01, 5.0, 1.0)
     iterations = st.sidebar.slider('Iterations', 10, 1000, 100)
     topology = st.sidebar.selectbox(
-        'Topology', ['Hexagonal', 'Rectangular'])
+        'Topology', ['hexagonal', 'rectangular'])
     # tick box to skip the calculation of errors at each step
     skip_errors = st.sidebar.checkbox(
         'Skip QE and TE calculation at each step', value=True)
