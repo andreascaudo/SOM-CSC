@@ -1,0 +1,8 @@
+streamlit
+altair
+pandas
+numpy
+MiniSom
+pickle
+time
+math
