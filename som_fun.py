@@ -6,9 +6,6 @@ import streamlit as st
 import altair as alt
 import math
 
-# delate
-from vega_datasets import data
-
 
 def train_som(X, x, y, input_len, sigma, learning_rate, train_iterations, topology):
     # initialization
