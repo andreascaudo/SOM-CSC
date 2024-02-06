@@ -424,6 +424,13 @@ def features_plot_hex(map, scaling=sum):
                     np_map[idx_outer][idx_inner] = np.median(sublist)
                 except TypeError:
                     np_map[idx_outer][idx_inner] = 0
+    elif scaling == 'std':
+        for idx_outer, sublist_outer in enumerate(map):
+            for idx_inner, sublist in enumerate(sublist_outer):
+                try:
+                    np_map[idx_outer][idx_inner] = np.std(sublist)
+                except TypeError:
+                    np_map[idx_outer][idx_inner] = 0
     else:
         raise ValueError('scaling method not recognized')
 
