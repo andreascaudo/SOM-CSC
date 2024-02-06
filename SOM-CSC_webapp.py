@@ -148,9 +148,9 @@ with st.form(key='plot_form'):
                 feature = st.selectbox(
                     'Feature', st.session_state.raw_df.columns.to_list())
                 scaling = st.selectbox(
-                    'Scaling', ['mean', 'min', 'max', 'sum', 'std'])
+                    'Scaling', ['mean', 'min', 'max', 'sum', 'median', 'std'])
                 st.write(
-                    '###### After selecting the feature and scaling ➡️ click the Show plot button to reload the image')
+                    '###### After selecting the feature and applying scaling, click the "Show plot" button to refresh the map.')
                 var_prob_m = project_feature(
                     st.session_state.som, X, st.session_state.raw_df[feature])
                 if st.session_state.som.topology == 'rectangular':
