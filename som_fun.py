@@ -553,3 +553,34 @@ def features_plot(map, scaling=sum):
     )
     st.write('## SOM feature plot')
     st.altair_chart(c, use_container_width=True)
+
+
+def validate_and_load_dataset(uploaded_file, expected_columns):
+    """
+    Validates and loads a dataset from an uploaded CSV file.
+
+    Parameters:
+    - uploaded_file: The uploaded file object.
+    - expected_columns: A list of column names expected in the file, excluding the additional column.
+
+    Returns:
+    - The loaded pandas DataFrame if validation is successful, None otherwise.
+    """
+    # Load the dataset
+    try:
+        df = pd.read_csv(uploaded_file)
+    except Exception as e:
+        print(f"Error loading dataset: {e}")
+        return None
+
+    # Validate column names (assuming the last column is the new feature to be projected)
+    if not set(expected_columns).issubset(set(df.columns[:-1])):
+        print("Column names do not match the expected columns.")
+        return None
+
+    # Check for empty values
+    if df.isnull().values.any():
+        print("The dataset contains empty values.")
+        return None
+
+    return df
