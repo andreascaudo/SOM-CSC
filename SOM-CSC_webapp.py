@@ -113,8 +113,8 @@ else:
             label="Download", data=pickle.dumps([st.session_state.som, features]), file_name='SOM_model.pkl', mime='application/octet-stream', help='Download the SOM model store it and to upload it later')
 
 
-with st.form(key='plot_form'):
-    if st.session_state.SOM_loaded:
+if st.session_state.SOM_loaded:
+    with st.form(key='plot_form'):
         st.write('## Select which plot to display')
         plot_type = st.selectbox(
             'Plot type', ['U-Matrix', 'Scatter Visualization [cluster]', 'Category Visualization [cluster]', 'Feature Visualization', 'Custom Feature Visualization'], help='Select the type of visualization to display')
@@ -221,7 +221,7 @@ with st.form(key='plot_form'):
                                     "Dataset validation failed. Please check the column names and ensure there are no empty values.")
                         except Exception as e:
                             st.error(f"An error occurred: {e}")
-    else:
-        st.write('## SOM model not loaded')
-        st.write(
-            'Please load a SOM model or generate a new one to visualize the map.')
+else:
+    st.write('## SOM model not loaded')
+    st.write(
+        'Please load a SOM model or generate a new one to visualize the map.')
