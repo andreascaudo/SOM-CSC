@@ -222,6 +222,5 @@ if st.session_state.SOM_loaded:
                         except Exception as e:
                             st.error(f"An error occurred: {e}")
 else:
-    st.write('## SOM model not loaded')
     st.write(
         'Please load a SOM model or generate a new one to visualize the map.')
