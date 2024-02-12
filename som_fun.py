@@ -203,6 +203,7 @@ def scatter_plot_clustering_hex(som, X, GMM_cluster_labels):
 
 
 def scatter_plot_clustering(som, X, GMM_cluster_labels):
+
     w_x, w_y = zip(*[som.winner(d) for d in X])
     w_x = np.array(w_x, dtype=float)
     w_y = np.array(w_y, dtype=float)
@@ -239,19 +240,240 @@ def scatter_plot_clustering(som, X, GMM_cluster_labels):
     st.altair_chart(scatter_chart_sample, use_container_width=True)
 
 
-def project_feature(som, X, feature):
+def scatter_plot_sources(som, sources, raw_df, X):
+    # get the index where the sources are in the raw_df and get rows from X
+    idx = raw_df.index[raw_df['name'].isin(sources)]
+    X_sources_name = raw_df['name'][idx]
+    X_sources = X[idx]
+
+    w_x, w_y = zip(*[som.winner(d) for d in X_sources])
+    w_x = np.array(w_x, dtype=float)
+    w_y = np.array(w_y, dtype=float)
+
+    for c in sources:
+        idx_target = np.array(X_sources_name) == c
+        w_x[idx_target] += .5 + \
+            (np.random.rand(np.sum(idx_target))-.5)*.8
+        w_y[idx_target] += +.5 + \
+            (np.random.rand(np.sum(idx_target))-.5)*.8
+
+    scatter_chart_sample_df = pd.DataFrame(
+        {'w_y': w_y, 'w_x': w_x, 'sources': X_sources_name})
+
+    dimension = som.get_weights().shape[0]
+    min_x = 0
+    max_x = dimension
+    min_y = 0
+    max_y = dimension
+
+    scatter_chart_sample = alt.Chart(scatter_chart_sample_df).mark_circle().encode(
+        x=alt.X('w_x', title='', scale=alt.Scale(
+            domain=[min_x-1, max_x+1])).axis(
+            grid=False),
+        y=alt.Y('w_y', title='', scale=alt.Scale(
+            domain=[min_y-1, max_y+1])).axis(
+            grid=False),
+        color=alt.Color('sources:N', scale=alt.Scale(
+            scheme='lightmulti')).legend(orient='bottom')
+    ).properties(
+        width=600,
+        height=600
+    )
+
+    st.write('## SOM scatter plot')
+    st.altair_chart(scatter_chart_sample, use_container_width=True)
+
+
+def scatter_plot_sources_hex(som, sources, raw_df, X):
+    # get the index where the sources are in the raw_df and get rows from X
+    idx = raw_df.index[raw_df['name'].isin(sources)]
+    X_sources_name = raw_df['name'][idx]
+    X_sources = X[idx]
+
+    w_x = []
+    w_y = []
+    for cnt, x in enumerate(X_sources):
+        # getting the winner
+        w = som.winner(x)
+        # place a marker on the winning position for the sample xx
+        wx, wy = som.convert_map_to_euclidean(w)
+        wy = wy * np.sqrt(3) / 2
+        w_x.append(wx)
+        w_y.append(wy)
+
+    w_x = np.array(w_x, dtype=float)
+    w_y = np.array(w_y, dtype=float)
+
+    for c in sources:
+        idx_target = np.array(X_sources_name) == c
+        num_points = np.sum(idx_target)
+
+        # Generate random angles and distances
+        random_angles = np.random.uniform(0, 2 * np.pi, num_points)
+        random_distances = np.sqrt(np.random.uniform(
+            0, 1, num_points)) * 0.5
+
+        # Convert polar coordinates to Cartesian coordinates
+        w_x[idx_target] += random_distances * np.cos(random_angles)
+        w_y[idx_target] += random_distances * np.sin(random_angles)
+
+    scatter_chart_sample_df = pd.DataFrame(
+        {'w_y': w_y, 'w_x': w_x, 'sources': X_sources_name})
+
+    dimension = som.get_weights().shape[0]
+    min_x = 0
+    max_x = dimension
+    min_y = 0
+    max_y = dimension
+
+    size = new_sizes[np.where(
+        new_dimensions == som.get_weights().shape[0])[0][0]]
+
+    hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
+    scatter_chart_sample = alt.Chart(scatter_chart_sample_df).mark_circle().encode(
+        x=alt.X('w_x:Q', title='', scale=alt.Scale(
+            domain=[min_x-1, max_x+1])).axis(
+            grid=False, tickOpacity=0
+        ),
+        y=alt.Y('w_y:Q', title='', scale=alt.Scale(
+            domain=[min_y-1, max_y+1])).axis(
+            grid=False, tickOpacity=0
+        ),
+        color=alt.Color('sources:N', scale=alt.Scale(
+            scheme='lightmulti')).legend(orient='bottom')
+    ).properties(
+        width=600,
+        height=600
+    ).configure_view(
+        strokeWidth=0
+    )
+
+    st.write('## SOM scatter plot')
+    st.altair_chart(scatter_chart_sample, use_container_width=True)
+
+
+def project_feature(som, X, feature, source=None):
     '''
     Returns a 2D map of lists containing the values of the external feature for each neuron of the SOM
     '''
     map = [[[None] for _ in range(som._weights.shape[1])]
            for _ in range(som._weights.shape[0])]
     for cnt, xx in enumerate(X):
+        if source is not None:
+            # is not in source
+            if not feature[cnt] in source:
+                continue
         w = som.winner(xx)
         if map[w[0]][w[1]][0] == None:
             map[w[0]][w[1]] = [feature[cnt]]
         else:
             map[w[0]][w[1]].append(feature[cnt])
     return map
+
+
+def category_plot_sources(_map):
+
+    _map = list(map(list, zip(*_map)))
+    '''
+    plot the most common element in the list
+    '''
+    # plt.figure(figsize=(10, 10))
+    # bone
+    # Convert map to a list of lists (2D) by summing or averaging over the third dimension
+    winning_categories = []
+    for idx_outer, sublist_outer in enumerate(_map):
+        for idx_inner, sublist in enumerate(sublist_outer):
+            # the most common element in the list is the category
+            winning_categories.append(
+                [int(idx_outer+1), int(idx_inner+1), max(set(sublist), key=sublist.count)])
+
+    winning_categories = np.array(winning_categories)
+
+    pd_winning_categories = pd.DataFrame(
+        winning_categories, columns=['w_y', 'w_x', 'source'])
+
+    # remove row with cluster None
+    pd_winning_categories = pd_winning_categories.dropna()
+
+    scatter_chart_sample = alt.Chart(pd_winning_categories).mark_rect().encode(
+        x=alt.X('w_x:O', title=''),
+        y=alt.Y('w_y:O', sort=alt.EncodingSortField(
+            'w_y', order='descending'), title=''),
+        color=alt.Color(
+            'source:N', scale=alt.Scale(scheme='lightmulti'), legend=alt.Legend(orient='bottom'))
+    ).properties(
+        width=600,
+        height=700
+    )
+    st.write('## SOM category plot')
+    st.altair_chart(scatter_chart_sample, use_container_width=True)
+
+
+def category_plot_sources_hex(_map):
+    _map = list(map(list, zip(*_map)))
+    '''
+    plot the most common element in the list
+    '''
+    # plt.figure(figsize=(10, 10))
+    # bone
+    # Convert map to a list of lists (2D) by summing or averaging over the third dimension
+    winning_categories = []
+    for idx_outer, sublist_outer in enumerate(_map):
+        for idx_inner, sublist in enumerate(sublist_outer):
+            # the most common element in the list is the category
+            winning_categories.append(
+                [int(idx_outer+1), int(idx_inner+1), max(set(sublist), key=sublist.count)])
+
+    winning_categories = np.array(winning_categories)
+
+    pd_winning_categories = pd.DataFrame(
+        winning_categories, columns=['y', 'x', 'source'])
+
+    min_x = pd_winning_categories['x'].min()
+    max_x = pd_winning_categories['x'].max()
+    min_y = pd_winning_categories['y'].min()
+    max_y = pd_winning_categories['y'].max()
+
+    # drop rows with source None
+    pd_winning_categories = pd_winning_categories.dropna()
+
+    # set x and y as float
+    pd_winning_categories['x'] = pd_winning_categories['x'].astype(float)
+    pd_winning_categories['y'] = pd_winning_categories['y'].astype(float)
+
+    # order the dataframe using x and y
+    pd_winning_categories = pd_winning_categories.sort_values(by=['x', 'y'])
+    pd_winning_categories = pd_winning_categories.reset_index(drop=True)
+
+    # get index from new_dimensions
+    index = np.where(new_dimensions == len(_map))[0][0]
+    size = new_sizes[index]
+
+    hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
+    c = alt.Chart(pd_winning_categories).mark_point(shape=hexagon, size=size**2).encode(
+        x=alt.X('xFeaturePos:Q', title='', scale=alt.Scale(domain=[min_x-1, max_x+1])).axis(
+            grid=False, tickOpacity=0, domainOpacity=0),
+        y=alt.Y('y:Q', sort=alt.EncodingSortField(
+            'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])
+        ).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
+        color=alt.Color(
+            'source:N', scale=alt.Scale(scheme='lightmulti')),
+        fill=alt.Color('source:N', scale=alt.Scale(
+            scheme='lightmulti')).legend(orient='bottom'),
+        stroke=alt.value('black'),
+        strokeWidth=alt.value(1.0)
+    ).transform_calculate(
+        # This field is required for the hexagonal X-Offset
+        xFeaturePos='(datum.y%2)/2 + datum.x-.5'
+    ).properties(
+        # width should be the same as the height
+        height=700,
+        width=600,
+    ).configure_view(
+        strokeWidth=0
+    )
+    st.write('## SOM category plot')
+    st.altair_chart(c, use_container_width=True)
 
 
 def category_plot_clustering_hex(map):
@@ -461,7 +683,7 @@ def features_plot_hex(map, scaling=sum):
             'y', order='descending'), title='', scale=alt.Scale(
                 domain=[min_y-1, max_y+1])).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
         color=alt.Color(
-            'value:Q', scale=alt.Scale(scheme='lightmulti')),
+            'value:Q', scale=alt.Scale(scheme='lightmulti', type='pow')),
         fill=alt.Color('value:Q', scale=alt.Scale(
             scheme='lightmulti')).legend(orient='bottom'),
         stroke=alt.value('black'),
@@ -471,8 +693,7 @@ def features_plot_hex(map, scaling=sum):
         xFeaturePos='(datum.y%2)/2 + datum.x-.5'
     ).properties(
         # width should be the same as the height
-        height=700,
-        width=600,
+        height=750,
     ).configure_view(
         strokeWidth=0
     )
@@ -546,10 +767,9 @@ def features_plot(map, scaling=sum):
         y=alt.Y('y:O', sort=alt.EncodingSortField(
             'y', order='descending'), title=''),
         color=alt.Color(
-            'value:Q', scale=alt.Scale(scheme='lightmulti'))
+            'value:Q', scale=alt.Scale(scheme='lightmulti')).legend(orient='bottom')
     ).properties(
-        width=600,
-        height=600
+        height=750
     )
     st.write('## SOM feature plot')
     st.altair_chart(c, use_container_width=True)

@@ -64,12 +64,12 @@ else:
     st.sidebar.write('Select the SOM hyperparameters')
     dim = st.sidebar.slider(
         'Dimension', 6, 100, 30, help='The map\'s dimensions will be [dim x dim], forming a square layout.')
-    sigma = st.sidebar.slider('Sigma', 0.01, 5.0, 1.0,
+    sigma = st.sidebar.slider('Sigma', 0.01, 5.0, 3.8,
                               help='The spread of the neighborhood function')
     learning_rate = st.sidebar.slider(
-        'Learning rate', 0.01, 5.0, 1.0, help='The degree of weight updates')
+        'Learning rate', 0.01, 5.0, 1.8, help='The degree of weight updates')
     iterations = st.sidebar.slider(
-        'Iterations', 10, 1000, 100, help='Number of training iterations')
+        'Iterations', 10, 1000, 500, help='Number of training iterations')
     topology = st.sidebar.selectbox(
         'Topology', ['hexagonal', 'rectangular'], help='Topology of the neurons in the SOM grid')
     # tick box to skip the calculation of errors at each step
@@ -117,7 +117,7 @@ if st.session_state.SOM_loaded:
     with st.form(key='plot_form'):
         st.write('## Select which plot to display')
         plot_type = st.selectbox(
-            'Plot type', ['U-Matrix', 'Scatter Visualization [cluster]', 'Category Visualization [cluster]', 'Feature Visualization', 'Custom Feature Visualization'], help='Select the type of visualization to display')
+            'Plot type', ['U-Matrix', 'Source Scatter Visualization', 'Source Category Visualization', 'Scatter Visualization [cluster]', 'Category Visualization [cluster]', 'Feature Visualization', 'Custom Feature Visualization'], help='Select the type of visualization to display')
         plot_submit = st.form_submit_button('Show plot')
 
         if plot_submit:
@@ -132,6 +132,47 @@ if st.session_state.SOM_loaded:
                 else:
                     plot_u_matrix_hex(st.session_state.som)
                     # test()
+            elif plot_type == 'Source Scatter Visualization':
+                with st.expander("See explanation"):
+                    st.write(
+                        'This visualization tool enables the user to apply color coding to the pre-trained SOM according to the names of data sources.')
+                    st.write(
+                        'The user can select one or more sources to visualize the distribution of sources across the map.')
+                    st.write(
+                        'The color assigned to each point on the map will signify the name of its corresponding source.')
+                # Category plot
+                sources = st.multiselect(
+                    'Select sources name', st.session_state.raw_df['name'].unique())
+                st.write(
+                    "###### To update the map with the name of the selected sources, please click the 'Show Plot' button again.")
+                if len(sources) > 0:
+                    if st.session_state.som.topology == 'rectangular':
+                        scatter_plot_sources(
+                            st.session_state.som, sources, st.session_state.raw_df, X)
+                    else:
+                        scatter_plot_sources_hex(
+                            st.session_state.som, sources, st.session_state.raw_df, X)
+            elif plot_type == 'Source Category Visualization':
+                with st.expander("See explanation"):
+                    st.write(
+                        'This visualization tool enables the user to apply color coding to the pre-trained SOM according to source names.')
+                    st.write(
+                        'The user can select one or more sources to visualize the distribution of sources across the map.')
+                    st.write(
+                        'The color of each neuron will indicate the source name that appears most frequently within that neuron.')
+                # Category plot
+                sources = st.multiselect(
+                    'Select sources name', st.session_state.raw_df['name'].unique())
+                st.write(
+                    "###### To update the map with the name of the selected sources, please click the 'Show Plot' button again.")
+
+                if len(sources) > 0:
+                    category_map = project_feature(
+                        st.session_state.som, X, st.session_state.raw_df['name'], sources)
+                    if st.session_state.som.topology == 'rectangular':
+                        category_plot_sources(category_map)
+                    else:
+                        category_plot_sources_hex(category_map)
             elif plot_type == 'Scatter Visualization [cluster]':
                 # Scatter plot
                 if st.session_state.som.topology == 'rectangular':
