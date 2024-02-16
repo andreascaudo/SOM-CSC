@@ -24,13 +24,20 @@ elif st.session_state.SOM_loaded == False:
     st.write('#### SOM STATUS: :red[NOT LOADED]')
 
 raw_dataset_path = './data/cluster_csc_simbad.csv'
+main_dataset_path = './data/cluster_csc_simbad_main_type.csv'
 dataset_path = './data/cluster_csc_simbad_log_normalized.csv'
 
 # Load the dataset
 st.session_state.raw_df = pd.read_csv(raw_dataset_path)
+st.session_state.main_type_df = pd.read_csv(main_dataset_path)
 st.session_state.df = pd.read_csv(dataset_path)
 
-GMM_cluster_labels = st.session_state.df['cluster']
+# GMM_cluster_labels = st.session_state.df['cluster']
+main_type = st.session_state.main_type_df['main_type']
+# default_main_type = ['QSO', 'AGN', 'Seyfert_1', 'Seyfert_2', 'HMXB',
+#                     'LMXB', 'XB', 'YSO', 'TTau*', 'Orion_V*']
+
+default_main_type = ['YSO', 'XB', 'Seyfert', 'AGN']
 
 # sidebar for the dataset
 st.sidebar.header('User input')
@@ -112,12 +119,12 @@ else:
         st.download_button(
             label="Download", data=pickle.dumps([st.session_state.som, features]), file_name='SOM_model.pkl', mime='application/octet-stream', help='Download the SOM model store it and to upload it later')
 
-
 if st.session_state.SOM_loaded:
     with st.form(key='plot_form'):
         st.write('## Select which plot to display')
         plot_type = st.selectbox(
-            'Plot type', ['U-Matrix', 'Source Scatter Visualization', 'Source Category Visualization', 'Scatter Visualization [cluster]', 'Category Visualization [cluster]', 'Feature Visualization', 'Custom Feature Visualization'], help='Select the type of visualization to display')
+            'Plot type', ['U-Matrix', 'Source Name Visualization', 'Main Type Visualization', 'Feature Visualization'], help='Select the type of visualization to display')
+
         plot_submit = st.form_submit_button('Show plot')
 
         if plot_submit:
@@ -131,111 +138,138 @@ if st.session_state.SOM_loaded:
                     plot_rectangular_u_matrix(st.session_state.som)
                 else:
                     plot_u_matrix_hex(st.session_state.som)
-                    # test()
-            elif plot_type == 'Source Scatter Visualization':
-                with st.expander("See explanation"):
-                    st.write(
-                        'This visualization tool enables the user to apply color coding to the pre-trained SOM according to the names of data sources.')
-                    st.write(
-                        'The user can select one or more sources to visualize the distribution of sources across the map.')
-                    st.write(
-                        'The color assigned to each point on the map will signify the name of its corresponding source.')
-                # Category plot
-                sources = st.multiselect(
-                    'Select sources name', st.session_state.raw_df['name'].unique())
-                st.write(
-                    "###### To update the map with the name of the selected sources, please click the 'Show Plot' button again.")
-                if len(sources) > 0:
-                    if st.session_state.som.topology == 'rectangular':
-                        scatter_plot_sources(
-                            st.session_state.som, sources, st.session_state.raw_df, X)
-                    else:
-                        scatter_plot_sources_hex(
-                            st.session_state.som, sources, st.session_state.raw_df, X)
-            elif plot_type == 'Source Category Visualization':
-                with st.expander("See explanation"):
-                    st.write(
-                        'This visualization tool enables the user to apply color coding to the pre-trained SOM according to source names.')
-                    st.write(
-                        'The user can select one or more sources to visualize the distribution of sources across the map.')
-                    st.write(
-                        'The color of each neuron will indicate the source name that appears most frequently within that neuron.')
-                # Category plot
-                sources = st.multiselect(
-                    'Select sources name', st.session_state.raw_df['name'].unique())
-                st.write(
-                    "###### To update the map with the name of the selected sources, please click the 'Show Plot' button again.")
+            elif plot_type == 'Source Name Visualization':
+                if st.session_state.som.topology == 'rectangular':
+                    vis_type_string = 'Rectangular'
+                elif st.session_state.som.topology == 'hexagonal':
+                    vis_type_string = 'Hexbin'
 
+                with st.expander("See explanation"):
+                    st.write(
+                        '##### This visualization tool enables the user to apply color coding to the pre-trained SOM according to the names of data sources.')
+                    st.write(
+                        '##### The user can select one or more sources to visualize the distribution of sources across the map.')
+                    st.write(
+                        '##### The user can choose between two visualization types: Scatter and ' + vis_type_string + '.')
+                    st.write(
+                        '***Scatter visualization:*** The color assigned to each point on the map will signify the source name of its corresponding detection.')
+                    st.write('***' +
+                             vis_type_string + ' visualization:*** The color of each neuron will indicate the source name that appears most frequently within that neuron.')
+                # Category plot
+                sources = st.multiselect(
+                    'Select sources name', st.session_state.raw_df['name'].unique())
+                visualization_type = st.radio(
+                    'Visualization type', ['Scatter', vis_type_string])
+                st.write(
+                    "###### To update the map with the name of the selected sources, please click the 'Show Plot' button again.")
                 if len(sources) > 0:
-                    category_map = project_feature(
-                        st.session_state.som, X, st.session_state.raw_df['name'], sources)
                     if st.session_state.som.topology == 'rectangular':
-                        category_plot_sources(category_map)
-                    else:
-                        category_plot_sources_hex(category_map)
-            elif plot_type == 'Scatter Visualization [cluster]':
+                        if visualization_type == 'Scatter':
+                            scatter_plot_sources(
+                                st.session_state.som, sources, st.session_state.raw_df, X, 'name')
+                        elif visualization_type == 'Rectangular':
+                            category_map = project_feature(
+                                st.session_state.som, X, st.session_state.raw_df['name'], sources)
+                            category_plot_sources(category_map)
+                    elif st.session_state.som.topology == 'hexagonal':
+                        if visualization_type == 'Scatter':
+                            scatter_plot_sources_hex(
+                                st.session_state.som, sources, st.session_state.raw_df, X, 'name')
+                        elif visualization_type == 'Hexbin':
+                            category_map = project_feature(
+                                st.session_state.som, X, st.session_state.raw_df['name'], sources)
+                            category_plot_sources_hex(category_map)
+            elif plot_type == 'Main Type Visualization':
+                if st.session_state.som.topology == 'rectangular':
+                    vis_type_string = 'Rectangular'
+                elif st.session_state.som.topology == 'hexagonal':
+                    vis_type_string = 'Hexbin'
+
+                with st.expander("See explanation"):
+                    st.write(
+                        '##### This visualization tool enables the user to apply color coding to the pre-trained SOM according to the main types of data detections.')
+                    st.write(
+                        '##### The user can select one or more main types to visualize the distribution of detections across the map.')
+                    st.write(
+                        '##### The user can choose between two visualization types: Scatter and ' + vis_type_string + '.')
+                    st.write(
+                        '***Scatter visualization:*** The color assigned to each point on the map will signify the main type of its corresponding detection.')
+                    st.write('***' +
+                             vis_type_string + ' visualization:*** The color of each neuron will indicate the main type that appears most frequently within that neuron.')
                 # Scatter plot
-                if st.session_state.som.topology == 'rectangular':
-                    scatter_plot_clustering(
-                        st.session_state.som, X, GMM_cluster_labels)
-                else:
-                    scatter_plot_clustering_hex(
-                        st.session_state.som, X, GMM_cluster_labels)
-            elif plot_type == 'Category Visualization [cluster]':
-                # Category plot
-                category_map = project_feature(
-                    st.session_state.som, X, GMM_cluster_labels)
-                if st.session_state.som.topology == 'rectangular':
-                    category_plot_clustering(category_map)
-                else:
-                    category_plot_clustering_hex(category_map)
-            elif plot_type == 'Feature Visualization':
-                # Feature plot
-                # subform to select a features
-                with st.expander("See explanation"):
-                    st.write(
-                        'This visualization will color the pre-trained SOM based on a selected feature, implementing a scaling method to each neuron.')
-                    st.write(
-                        'For example, if the selected feature represents the mean value of a particular column, each neuron\'s color will reflect the average of that column.')
-                    st.write(
-                        'Additionally, the frequency of samples at a specific neuron indicates the number of times that neuron was identified as the best matching unit for a sample.')
-                feature = st.selectbox(
-                    'Feature', st.session_state.raw_df.columns.to_list())
-                scaling = st.selectbox(
-                    'Scaling', ['mean', 'min', 'max', 'sum', 'median', 'std'])
-                st.write(
-                    "###### To update the map with the selected feature and applied scaling, please click the 'Show Plot' button again.")
-                var = project_feature(
-                    st.session_state.som, X, st.session_state.raw_df[feature])
-                if st.session_state.som.topology == 'rectangular':
-                    features_plot(var, scaling=scaling)
-                else:
-                    features_plot_hex(var, scaling=scaling)
-            elif plot_type == 'Custom Feature Visualization':
-                with st.expander("See explanation"):
-                    st.write('This visualization tool enables coloring of the pre-trained SOM based on data from a newly uploaded dataset, allowing users to dynamically select which feature to use for coloring. Users have the flexibility to upload a new dataset and choose a specific feature that will be applied to color the previously trained SOM.')
-                    st.write(
-                        '⚠️ **The uploaded file must to be a .csv file with a specific structure:** ⚠️')
-                    st.write(
-                        'The initial columns should contain the features utilized for training the SOM, and these features must be already normalized. The final column should represent the feature intended for coloring the map. For instance, if the SOM was trained with features A, B, and C (all normalized), and you wish to color the map using feature D, the CSV file should be organized as follows:')
-                    st.write(
-                        '**A, B, C, D**')
-                    st.write(
-                        '*x1, y1, z1, 1*')
-                    st.write(
-                        '*x2, y2, z2, 2*')
-                    st.write(
-                        '*...*')
-                    st.write(
-                        '*xn, yn, zn, n*')
-                st.write(
-                    "###### To display the map with the loaded dataset and applied scaling, please click the 'Show Plot' button again.")
+                main_type_ = st.multiselect(
+                    'Main type', np.unique(main_type.dropna()).tolist(), default_main_type)
+                visualization_type = st.radio(
+                    'Visualization type', ['Scatter', vis_type_string])
 
+                st.write(
+                    "###### To update the map with the name of the selected sources, please click the 'Show Plot' button again.")
+
+                if len(main_type_) > 0:
+                    if st.session_state.som.topology == 'rectangular':
+                        if visualization_type == 'Scatter':
+                            scatter_plot_sources(
+                                st.session_state.som, main_type_, st.session_state.main_type_df, X, 'main_type')
+                        elif visualization_type == 'Rectangular':
+                            category_map = project_feature(
+                                st.session_state.som, X, st.session_state.main_type_df['main_type'], main_type_)
+                            category_plot_sources(category_map)
+                    elif st.session_state.som.topology == 'hexagonal':
+                        if visualization_type == 'Scatter':
+                            scatter_plot_sources_hex(
+                                st.session_state.som, main_type_, st.session_state.main_type_df, X, 'main_type')
+                        elif visualization_type == 'Hexbin':
+                            category_map = project_feature(
+                                st.session_state.som, X, st.session_state.main_type_df['main_type'], main_type_)
+                            category_plot_sources_hex(category_map)
+            elif plot_type == 'Feature Visualization':
+                dataset_choice = st.radio(
+                    'Choose the dataset', ['Use the main dataset', 'Upload a new dataset'])
+
+                if dataset_choice == 'Use the main dataset':
+                    with st.expander("See explanation"):
+                        st.write(
+                            'This visualization will color the pre-trained SOM based on a selected feature, implementing a scaling method to each neuron.')
+                        st.write(
+                            'For example, if the selected feature represents the mean value of a particular column, each neuron\'s color will reflect the average of that column.')
+                        st.write(
+                            'Additionally, the frequency of samples at a specific neuron indicates the number of times that neuron was identified as the best matching unit for a sample.')
+                    feature = st.selectbox(
+                        'Feature', st.session_state.raw_df.columns.to_list())
+                    scaling = st.selectbox(
+                        'Scaling', ['mean', 'min', 'max', 'sum', 'median', 'std'])
+                    st.write(
+                        "###### Please click the 'Show Plot' button after choosing the dataset type or to display the map, in order to refresh the view.")
+                    var = project_feature(
+                        st.session_state.som, X, st.session_state.raw_df[feature])
+                    if st.session_state.som.topology == 'rectangular':
+                        features_plot(var, scaling=scaling)
+                    else:
+                        features_plot_hex(var, scaling=scaling)
+                elif dataset_choice == 'Upload a new dataset':
+                    with st.expander("See explanation"):
+                        st.write('This visualization tool enables coloring of the pre-trained SOM based on data from a newly uploaded dataset, allowing users to dynamically select which feature to use for coloring. Users have the flexibility to upload a new dataset and choose a specific feature that will be applied to color the previously trained SOM.')
+                        st.write(
+                            '⚠️ **The uploaded file must to be a .csv file with a specific structure:** ⚠️')
+                        st.write(
+                            'The initial columns should contain the features utilized for training the SOM, and these features must be already normalized. The final column should represent the feature intended for coloring the map. For instance, if the SOM was trained with features A, B, and C (all normalized), and you wish to color the map using feature D, the CSV file should be organized as follows:')
+                        st.write(
+                            '**A, B, C, D**')
+                        st.write(
+                            '*x1, y1, z1, 1*')
+                        st.write(
+                            '*x2, y2, z2, 2*')
+                        st.write(
+                            '*...*')
+                        st.write(
+                            '*xn, yn, zn, n*')
                 if st.session_state.SOM_loaded:
                     uploaded_file = st.file_uploader(
                         "Upload your CSV file", type="csv")
                     scaling = st.selectbox(
                         'Scaling', ['mean', 'min', 'max', 'sum', 'median', 'std'])
+                    st.write(
+                        "###### Please click the 'Show Plot' button after choosing the dataset type or to display the map, in order to refresh the view.")
                     if uploaded_file is not None:
                         # Attempt to load and validate the dataset
                         try:
@@ -252,7 +286,6 @@ if st.session_state.SOM_loaded:
                                 # Call to project_feature and features_plot goes here, using the new dataset
                                 var = project_feature(
                                     st.session_state.som, Xx, feature)
-                                st.write("DEBUG")
                                 if st.session_state.som.topology == 'rectangular':
                                     features_plot(var, scaling=scaling)
                                 else:

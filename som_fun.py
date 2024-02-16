@@ -151,14 +151,15 @@ def scatter_plot_clustering_hex(som, X, GMM_cluster_labels):
         w = som.winner(x)
         # place a marker on the winning position for the sample xx
         wx, wy = som.convert_map_to_euclidean(w)
-        wy = wy * np.sqrt(3) / 2
+        # wy = wy * np.sqrt(3) / 2
         w_x.append(wx)
         w_y.append(wy)
 
     w_x = np.array(w_x, dtype=float)
     w_y = np.array(w_y, dtype=float)
 
-    for c in np.unique(GMM_cluster_labels):
+    # st.write(set(GMM_cluster_labels.dropna()))
+    for c in GMM_cluster_labels:
         idx_target = GMM_cluster_labels == c
         num_points = np.sum(idx_target)
 
@@ -190,7 +191,8 @@ def scatter_plot_clustering_hex(som, X, GMM_cluster_labels):
         y=alt.Y('w_y:Q', title='', scale=alt.Scale(
             domain=[min_y-1, max_y+1])).axis(
             grid=False, tickOpacity=0, domainOpacity=0),
-        color=alt.Color('cluster:N', scale=alt.Scale(scheme='lightmulti')),
+        color=alt.Color('cluster:N', scale=alt.Scale(
+            scheme='lightmulti')).legend(orient='bottom'),
         strokeWidth=alt.value(1.0)
     ).properties(
         height=700,
@@ -240,13 +242,14 @@ def scatter_plot_clustering(som, X, GMM_cluster_labels):
     st.altair_chart(scatter_chart_sample, use_container_width=True)
 
 
-def scatter_plot_sources(som, sources, raw_df, X):
+def scatter_plot_sources(som, sources, raw_df, X, column_name):
     # get the index where the sources are in the raw_df and get rows from X
-    idx = raw_df.index[raw_df['name'].isin(sources)]
-    X_sources_name = raw_df['name'][idx]
+    idx = raw_df.index[raw_df[column_name].isin(sources)]
+    X_sources_name = raw_df[column_name][idx]
     X_sources = X[idx]
 
     w_x, w_y = zip(*[som.winner(d) for d in X_sources])
+
     w_x = np.array(w_x, dtype=float)
     w_y = np.array(w_y, dtype=float)
 
@@ -276,18 +279,18 @@ def scatter_plot_sources(som, sources, raw_df, X):
         color=alt.Color('sources:N', scale=alt.Scale(
             scheme='lightmulti')).legend(orient='bottom')
     ).properties(
-        width=600,
-        height=600
+        height=700,
+        width=600
     )
 
     st.write('## SOM scatter plot')
     st.altair_chart(scatter_chart_sample, use_container_width=True)
 
 
-def scatter_plot_sources_hex(som, sources, raw_df, X):
+def scatter_plot_sources_hex(som, sources, raw_df, X, column_name):
     # get the index where the sources are in the raw_df and get rows from X
-    idx = raw_df.index[raw_df['name'].isin(sources)]
-    X_sources_name = raw_df['name'][idx]
+    idx = raw_df.index[raw_df[column_name].isin(sources)]
+    X_sources_name = raw_df[column_name][idx]
     X_sources = X[idx]
 
     w_x = []
@@ -297,7 +300,7 @@ def scatter_plot_sources_hex(som, sources, raw_df, X):
         w = som.winner(x)
         # place a marker on the winning position for the sample xx
         wx, wy = som.convert_map_to_euclidean(w)
-        wy = wy * np.sqrt(3) / 2
+        # wy = wy * np.sqrt(3) / 2
         w_x.append(wx)
         w_y.append(wy)
 
@@ -342,8 +345,8 @@ def scatter_plot_sources_hex(som, sources, raw_df, X):
         color=alt.Color('sources:N', scale=alt.Scale(
             scheme='lightmulti')).legend(orient='bottom')
     ).properties(
+        height=700,
         width=600,
-        height=600
     ).configure_view(
         strokeWidth=0
     )
@@ -392,18 +395,25 @@ def category_plot_sources(_map):
     pd_winning_categories = pd.DataFrame(
         winning_categories, columns=['w_y', 'w_x', 'source'])
 
+    min_x = pd_winning_categories['w_x'].min()
+    max_x = pd_winning_categories['w_x'].max()
+    min_y = pd_winning_categories['w_y'].min()
+    max_y = pd_winning_categories['w_y'].max()
+
+    tick_x = np.arange(min_x, max_x+1, 1)
+    tick_y = np.arange(min_y, max_y+1, 1)[::-1]
     # remove row with cluster None
     pd_winning_categories = pd_winning_categories.dropna()
 
     scatter_chart_sample = alt.Chart(pd_winning_categories).mark_rect().encode(
-        x=alt.X('w_x:O', title=''),
+        x=alt.X('w_x:O', title='', scale=alt.Scale(domain=tick_x)),
         y=alt.Y('w_y:O', sort=alt.EncodingSortField(
-            'w_y', order='descending'), title=''),
+            'w_y', order='descending'), title='', scale=alt.Scale(domain=tick_y)),
         color=alt.Color(
             'source:N', scale=alt.Scale(scheme='lightmulti'), legend=alt.Legend(orient='bottom'))
     ).properties(
-        width=600,
-        height=700
+        height=700,
+        width=600
     )
     st.write('## SOM category plot')
     st.altair_chart(scatter_chart_sample, use_container_width=True)
