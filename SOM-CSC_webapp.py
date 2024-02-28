@@ -105,7 +105,7 @@ else:
             st.session_state.SOM_loaded = True
             st.session_state.SOM_loaded_trining = True
             st.balloons()
-            st.experimental_rerun()
+            st.rerun()
 
     elif st.session_state.SOM_loaded and st.session_state.SOM_loaded_trining:
         if not skip_errors:
@@ -123,7 +123,7 @@ if st.session_state.SOM_loaded:
     with st.form(key='plot_form'):
         st.write('## Select which plot to display')
         plot_type = st.selectbox(
-            'Plot type', ['U-Matrix', 'Source Name Visualization', 'Main Type Visualization', 'Feature Visualization'], help='Select the type of visualization to display')
+            'Plot type', ['U-Matrix', 'Activation Response', 'Feature Space Map', 'Source Name Visualization', 'Main Type Visualization', 'Feature Visualization'], help='Select the type of visualization to display')
 
         plot_submit = st.form_submit_button('Show plot')
 
@@ -138,6 +138,43 @@ if st.session_state.SOM_loaded:
                     plot_rectangular_u_matrix(st.session_state.som)
                 else:
                     plot_u_matrix_hex(st.session_state.som)
+            elif plot_type == 'Activation Response':
+                # Activation Response
+                st.write('## Activation Response')
+                with st.expander("See explanation"):
+                    st.write(
+                        'The Activation Response visualization tool enables the user to visualize the frequency of samples that are assigned to each neuron. The color of each neuron will indicate the number of times that neuron was identified as the best matching unit for a sample.')
+                if st.session_state.som.topology == 'rectangular':
+                    plot_activation_response(st.session_state.som, X)
+                else:
+                    plot_activation_response_hex(st.session_state.som, X)
+            elif plot_type == 'Feature Space Map':
+                # Feature Space Map
+                st.write('## Feature Space Map')
+                with st.expander("See explanation"):
+                    st.write(
+                        'The Feature Space Map visualization tool enables the user to apply color coding to the pre-trained SOM based on the weights of the neurons.')
+                    st.write(
+                        'The user can select one or more features to visualize the distribution of the features across the map.')
+                    st.write(
+                        'The user can also download the feature space map as a CSV file.')
+                features = st.multiselect(
+                    'Select features', st.session_state.df.columns.to_list())
+                # get the index of the selected features
+                features_index = [st.session_state.df.columns.get_loc(
+                    feature) for feature in features]
+
+                st.write(
+                    "###### To update the map with the selected features, please click the 'Show Plot' button again.")
+                # get weights
+                weights = st.session_state.som.get_weights()[
+                    :, :, features_index]
+                if len(features_index) > 0:
+                    if st.session_state.som.topology == 'rectangular':
+                        feature_space_map_plot(weights)
+                    else:
+                        feature_space_map_plot_hex(weights)
+
             elif plot_type == 'Source Name Visualization':
                 if st.session_state.som.topology == 'rectangular':
                     vis_type_string = 'Rectangular'

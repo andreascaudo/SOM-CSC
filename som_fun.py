@@ -108,7 +108,9 @@ def plot_u_matrix_hex(som):
 
     # get index from new_dimensions
     index = np.where(new_dimensions == som_shape[0])[0][0]
+    st.write(index)
     size = new_sizes[index]
+    st.write(size)
 
     st.u_matrix = u_matrix
     hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
@@ -136,7 +138,143 @@ def plot_u_matrix_hex(som):
     st.altair_chart(c, use_container_width=True)
 
 
-# Assuming you have a function to convert Cartesian to polar coordinates
+def plot_activation_response(som, X):
+    activation_map = som.activation_response(X)
+    activation_map = pd.DataFrame(
+        activation_map, columns=range(1, len(activation_map)+1), index=range(1, len(activation_map)+1))
+    activation_map = activation_map.melt(
+        var_name='x', value_name='value', ignore_index=False)
+    activation_map = activation_map.reset_index()
+    activation_map = activation_map.rename(columns={'index': 'y'})
+
+    min_x = activation_map['x'].min()
+    max_x = activation_map['x'].max()
+    min_y = activation_map['y'].min()
+    max_y = activation_map['y'].max()
+
+    c = alt.Chart(activation_map).mark_rect().encode(
+        x=alt.X('x:O', title=''),
+        y=alt.Y('y:O', sort=alt.EncodingSortField(
+            'y', order='descending'), title=''),
+        color=alt.Color(
+            'value:Q', scale=alt.Scale(scheme='lightmulti'))
+    ).properties(
+        width=600,
+        height=600
+    )
+    st.altair_chart(c, use_container_width=True)
+
+
+def plot_activation_response_hex(som, X):
+    activation_map = som.activation_response(X)
+    activation_map = pd.DataFrame(
+        activation_map, columns=range(1, len(activation_map)+1), index=range(1, len(activation_map)+1))
+    activation_map = activation_map.melt(
+        var_name='x', value_name='value', ignore_index=False)
+    activation_map = activation_map.reset_index()
+    activation_map = activation_map.rename(columns={'index': 'y'})
+
+    min_x = activation_map['x'].min()
+    max_x = activation_map['x'].max()
+    min_y = activation_map['y'].min()
+    max_y = activation_map['y'].max()
+
+    # get index from new_dimensions
+    index = np.where(new_dimensions == som.get_weights().shape[0])[0][0]
+    size = new_sizes[index]
+
+    hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
+    c = alt.Chart(activation_map).mark_point(shape=hexagon, size=size**2).encode(
+        x=alt.X('xFeaturePos:Q', title='', scale=alt.Scale(
+            domain=[min_x-1, max_x+1])).axis(grid=False, tickOpacity=0, domainOpacity=0),
+        y=alt.Y('y:Q', sort=alt.EncodingSortField(
+            'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
+        color=alt.Color(
+            'value:Q', scale=alt.Scale(scheme='lightmulti')),
+        fill=alt.Color('value:Q', scale=alt.Scale(
+            scheme='lightmulti')).legend(orient='bottom'),
+        stroke=alt.value('black'),
+        strokeWidth=alt.value(1.0)
+    ).transform_calculate(
+        # This field is required for the hexagonal X-Offset
+        xFeaturePos='(datum.y%2)/2 + datum.x-.5'
+    ).properties(
+        # width should be the same as the height
+        height=700,
+        width=600,
+    ).configure_view(
+        strokeWidth=0
+    )
+    st.altair_chart(c, use_container_width=True)
+
+
+def feature_space_map_plot(weights):
+    # plot the mean of the weights across lass dimension
+    mean_weights = np.mean(weights, axis=2)
+    mean_weights = pd.DataFrame(mean_weights, columns=range(
+        1, len(mean_weights)+1), index=range(1, len(mean_weights)+1))
+    mean_weights = mean_weights.melt(
+        var_name='x', value_name='value', ignore_index=False)
+    mean_weights = mean_weights.reset_index()
+    mean_weights = mean_weights.rename(columns={'index': 'y'})
+
+    c = alt.Chart(mean_weights).mark_rect().encode(
+        x=alt.X('x:O', title=''),
+        y=alt.Y('y:O', sort=alt.EncodingSortField(
+            'y', order='descending'), title=''),
+        color=alt.Color(
+            'value:Q', scale=alt.Scale(scheme='lightmulti'))
+    ).properties(
+        width=600,
+        height=600
+    )
+    st.altair_chart(c, use_container_width=True)
+
+
+def feature_space_map_plot_hex(weights):
+    # plot the mean of the weights across lass dimension
+    mean_weights = np.mean(weights, axis=2)
+    mean_weights = pd.DataFrame(mean_weights, columns=range(
+        1, len(mean_weights)+1), index=range(1, len(mean_weights)+1))
+    mean_weights = mean_weights.melt(
+        var_name='x', value_name='value', ignore_index=False)
+    mean_weights = mean_weights.reset_index()
+    mean_weights = mean_weights.rename(columns={'index': 'y'})
+
+    min_x = mean_weights['x'].min()
+    max_x = mean_weights['x'].max()
+    min_y = mean_weights['y'].min()
+    max_y = mean_weights['y'].max()
+
+    # get index from new_dimensions
+    index = np.where(new_dimensions == weights.shape[0])[0][0]
+    size = new_sizes[index]
+
+    hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
+    c = alt.Chart(mean_weights).mark_point(shape=hexagon, size=size**2).encode(
+        x=alt.X('xFeaturePos:Q', title='', scale=alt.Scale(
+            domain=[min_x-1, max_x+1])).axis(grid=False, tickOpacity=0, domainOpacity=0),
+        y=alt.Y('y:Q', sort=alt.EncodingSortField(
+            'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
+        color=alt.Color(
+            'value:Q', scale=alt.Scale(scheme='lightmulti')),
+        fill=alt.Color('value:Q', scale=alt.Scale(
+            scheme='lightmulti')).legend(orient='bottom'),
+        stroke=alt.value('black'),
+        strokeWidth=alt.value(1.0)
+    ).transform_calculate(
+        # This field is required for the hexagonal X-Offset
+        xFeaturePos='(datum.y%2)/2 + datum.x-.5'
+    ).properties(
+        # width should be the same as the height
+        height=700,
+        width=600,
+    ).configure_view(
+        strokeWidth=0
+    )
+    st.altair_chart(c, use_container_width=True)
+
+
 def cart2pol(x, y):
     rho = np.sqrt(x**2 + y**2)
     phi = np.arctan2(y, x)
