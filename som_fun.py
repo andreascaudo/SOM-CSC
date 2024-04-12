@@ -7,10 +7,10 @@ import altair as alt
 import math
 
 
-def train_som(X, x, y, input_len, sigma, learning_rate, train_iterations, topology):
+def train_som(X, x, y, input_len, sigma, learning_rate, train_iterations, topology, seed):
     # initialization
     som = MiniSom(x=x, y=y, input_len=input_len,
-                  sigma=sigma, learning_rate=learning_rate, topology=topology)
+                  sigma=sigma, learning_rate=learning_rate, topology=topology, random_seed=seed)
     som.random_weights_init(X)
     # training
     # start time
@@ -108,9 +108,7 @@ def plot_u_matrix_hex(som):
 
     # get index from new_dimensions
     index = np.where(new_dimensions == som_shape[0])[0][0]
-    st.write(index)
     size = new_sizes[index]
-    st.write(size)
 
     st.u_matrix = u_matrix
     hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"

@@ -23,9 +23,21 @@ elif st.session_state.SOM_loaded:
 elif st.session_state.SOM_loaded == False:
     st.write('#### SOM STATUS: :red[NOT LOADED]')
 
-raw_dataset_path = './data/cluster_csc_simbad.csv'
-main_dataset_path = './data/cluster_csc_simbad_main_type.csv'
-dataset_path = './data/cluster_csc_simbad_log_normalized.csv'
+# sidebar for the dataset
+st.sidebar.header('User input')
+new_df = st.sidebar.toggle('Dataset version 2.1', True)
+
+# toogle to select new vs old dataset
+# new dataset
+if new_df:
+    raw_dataset_path = './data/csc21_mastertable_observationlevel_COMPLETE.csv'
+    main_dataset_path = './data/cluster_csc_simbad_main_type.csv'
+    dataset_path = './data/csc21_mastertable_observationlevel_log_normalized.csv'
+else:
+    # old dataset
+    raw_dataset_path = './data/cluster_csc_simbad.csv'
+    main_dataset_path = './data/cluster_csc_simbad_main_type.csv'
+    dataset_path = './data/cluster_csc_simbad_log_normalized.csv'
 
 # Load the dataset
 st.session_state.raw_df = pd.read_csv(raw_dataset_path)
@@ -38,9 +50,6 @@ main_type = st.session_state.main_type_df['main_type']
 #                     'LMXB', 'XB', 'YSO', 'TTau*', 'Orion_V*']
 
 default_main_type = ['YSO', 'XB', 'Seyfert', 'AGN']
-
-# sidebar for the dataset
-st.sidebar.header('User input')
 
 # Let the user load a SOM model
 som_model = st.sidebar.file_uploader(
@@ -60,8 +69,12 @@ else:
     st.sidebar.write(
         '..or select the features and parameters for training the SOM')
     features = list(st.session_state.df.columns)
-    default_features = list(
-        st.session_state.df.columns.drop('cluster').drop('var_newq_b'))
+    if not new_df:
+        default_features = list(
+            st.session_state.df.columns.drop('cluster').drop('var_newq_b'))
+    else:
+        default_features = list(
+            st.session_state.df.columns.drop('var_newq_b'))
     features = st.sidebar.multiselect(
         'Features', features, default_features, help='Select the features to be used for training the SOM.')
     st.session_state.df = st.session_state.df[features]
@@ -79,6 +92,8 @@ else:
         'Iterations', 10, 1000, 500, help='Number of training iterations')
     topology = st.sidebar.selectbox(
         'Topology', ['hexagonal', 'rectangular'], help='Topology of the neurons in the SOM grid')
+    seed = st.sidebar.number_input(
+        'Seed', 0, 10000, 1234, help='Seed for reproducibility')
     # tick box to skip the calculation of errors at each step
     skip_errors = st.sidebar.checkbox(
         'Skip QE and TE computation at each step', value=True, help='Skip the computation of quantization and topographic errors at each step to reduce training duration. Deselect this option to gain insights into the required number of iterations for effective SOM training.')
@@ -100,7 +115,7 @@ else:
         # PLEASE WAIT
         with st.spinner('Training the SOM...'):
             st.session_state.som = train_som(X, dim, dim, len(features), sigma,
-                                             learning_rate, iterations, topology)
+                                             learning_rate, iterations, topology, seed)
             # baloons
             st.session_state.SOM_loaded = True
             st.session_state.SOM_loaded_trining = True
@@ -121,9 +136,13 @@ else:
 
 if st.session_state.SOM_loaded:
     with st.form(key='plot_form'):
-        st.write('## Select which plot to display')
-        plot_type = st.selectbox(
-            'Plot type', ['U-Matrix', 'Activation Response', 'Feature Space Map', 'Source Name Visualization', 'Main Type Visualization', 'Feature Visualization'], help='Select the type of visualization to display')
+        st.write('## Select the plot to be displayed')
+        if not new_df:
+            plot_type = st.selectbox(
+                'Plot type', ['U-Matrix', 'Activation Response', 'Training Feature Space Map', 'Source Name Visualization', 'Main Type Visualization', 'Feature Visualization'], help='Select the type of visualization to display')
+        else:
+            plot_type = st.selectbox(
+                'Plot type', ['U-Matrix', 'Activation Response', 'Training Feature Space Map', 'Source Name Visualization', 'Feature Visualization'], help='Select the type of visualization to display')
 
         plot_submit = st.form_submit_button('Show plot')
 
@@ -154,6 +173,8 @@ if st.session_state.SOM_loaded:
                 with st.expander("See explanation"):
                     st.write(
                         'The Feature Space Map visualization tool enables the user to apply color coding to the pre-trained SOM based on the weights of the neurons.')
+                    st.write(
+                        'If the user selects one or more features, the map will be colored according to the mean of the selected features across the map.')
                     st.write(
                         'The user can select one or more features to visualize the distribution of the features across the map.')
                     st.write(
@@ -216,7 +237,7 @@ if st.session_state.SOM_loaded:
                             category_map = project_feature(
                                 st.session_state.som, X, st.session_state.raw_df['name'], sources)
                             category_plot_sources_hex(category_map)
-            elif plot_type == 'Main Type Visualization':
+            elif plot_type == 'Main Type Visualization' and not new_df:
                 if st.session_state.som.topology == 'rectangular':
                     vis_type_string = 'Rectangular'
                 elif st.session_state.som.topology == 'hexagonal':
@@ -274,7 +295,7 @@ if st.session_state.SOM_loaded:
                     feature = st.selectbox(
                         'Feature', st.session_state.raw_df.columns.to_list())
                     scaling = st.selectbox(
-                        'Scaling', ['mean', 'min', 'max', 'sum', 'median', 'std'])
+                        'Feature Scaling', ['mean', 'min', 'max', 'sum', 'median', 'std'])
                     st.write(
                         "###### Please click the 'Show Plot' button after choosing the dataset type or to display the map, in order to refresh the view.")
                     var = project_feature(
@@ -304,7 +325,7 @@ if st.session_state.SOM_loaded:
                     uploaded_file = st.file_uploader(
                         "Upload your CSV file", type="csv")
                     scaling = st.selectbox(
-                        'Scaling', ['mean', 'min', 'max', 'sum', 'median', 'std'])
+                        'Upload Scaling', ['mean', 'min', 'max', 'sum', 'median', 'std'])
                     st.write(
                         "###### Please click the 'Show Plot' button after choosing the dataset type or to display the map, in order to refresh the view.")
                     if uploaded_file is not None:
