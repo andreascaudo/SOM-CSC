@@ -40,7 +40,7 @@ new_df = st.sidebar.toggle('Dataset version 2.1', True)
 # toogle to select new vs old dataset
 # new dataset
 if new_df:
-    raw_dataset_path = './data/csc21_mastertable_observationlevel_COMPLETE_noEmptyColumns'
+    raw_dataset_path = './data/csc21_mastertable_observationlevel_COMPLETE_noEmptyColumns/'
     main_dataset_path = './data/cluster_csc_simbad_main_type.csv'
     dataset_path = './data/csc21_mastertable_observationlevel_log_normalized.csv'
 else:
