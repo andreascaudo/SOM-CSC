@@ -6,8 +6,18 @@ from minisom import MiniSom
 import pickle
 import time
 from som_fun import *
+import glob
+import os
+
+
+def load_split_csvs(directory):
+    all_files = sorted(glob.glob(os.path.join(directory, '*.csv')))
+    df_list = [pd.read_csv(file) for file in all_files]
+    combined_df = pd.concat(df_list, ignore_index=True)
+    return combined_df
 
 # https://github.com/adam-p/markdown-here/wiki/Markdown-Cheatsheet
+
 
 st.write("""
 # Exploring the Chandra Source Catalog (CSC) using Self-Organizing Maps (SOM)
@@ -30,7 +40,7 @@ new_df = st.sidebar.toggle('Dataset version 2.1', True)
 # toogle to select new vs old dataset
 # new dataset
 if new_df:
-    raw_dataset_path = './data/csc21_mastertable_observationlevel_COMPLETE.csv'
+    raw_dataset_path = './data/csc21_mastertable_observationlevel_COMPLETE_noEmptyColumns'
     main_dataset_path = './data/cluster_csc_simbad_main_type.csv'
     dataset_path = './data/csc21_mastertable_observationlevel_log_normalized.csv'
 else:
@@ -40,7 +50,11 @@ else:
     dataset_path = './data/cluster_csc_simbad_log_normalized.csv'
 
 # Load the dataset
-st.session_state.raw_df = pd.read_csv(raw_dataset_path)
+if raw_dataset_path.endswith('.csv'):
+    st.session_state.raw_df = pd.read_csv(raw_dataset_path)
+else:
+    st.session_state.raw_df = load_split_csvs(raw_dataset_path)
+
 st.session_state.main_type_df = pd.read_csv(main_dataset_path)
 st.session_state.df = pd.read_csv(dataset_path)
 
