@@ -40,13 +40,10 @@ new_df = st.sidebar.toggle('Dataset version 2.1', True)
 # toogle to select new vs old dataset
 # new dataset
 if new_df:
-    raw_dataset_path = './data/csc21_mastertable_clean_observationlevel_COMPLETE_noEmptyColumns/'
-    main_dataset_path = './data/cluster_csc_simbad_main_type.csv'
-    dataset_path = './data/csc21_mastertable_observationlevel_log_normalized.csv'
+    raw_dataset_path = './data/csc21_mastertable_clean_observationlevel_xmatchSimbad1arcsec_log_norm/'
 else:
     # old dataset
     raw_dataset_path = './data/cluster_csc_simbad.csv'
-    main_dataset_path = './data/cluster_csc_simbad_main_type.csv'
     dataset_path = './data/cluster_csc_simbad_log_normalized.csv'
 
 # Load the dataset
@@ -55,11 +52,17 @@ if raw_dataset_path.endswith('.csv'):
 else:
     st.session_state.raw_df = load_split_csvs(raw_dataset_path)
 
-st.session_state.main_type_df = pd.read_csv(main_dataset_path)
-st.session_state.df = pd.read_csv(dataset_path)
+if not new_df:
+    st.session_state.df = pd.read_csv(dataset_path)
+else:
+    st.session_state.df = st.session_state.raw_df[['hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
+                                                   'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm', 'var_newq_b_log_norm']]
+    # remove log_norm from the columns name
+    st.session_state.df.columns = st.session_state.df.columns.str.replace(
+        '_log_norm', '')
 
 # GMM_cluster_labels = st.session_state.df['cluster']
-main_type = st.session_state.main_type_df['main_type']
+main_type = st.session_state.raw_df['main_type']
 # default_main_type = ['QSO', 'AGN', 'Seyfert_1', 'Seyfert_2', 'HMXB',
 #                     'LMXB', 'XB', 'YSO', 'TTau*', 'Orion_V*']
 
@@ -151,12 +154,9 @@ else:
 if st.session_state.SOM_loaded:
     with st.form(key='plot_form'):
         st.write('## Select the plot to be displayed')
-        if not new_df:
-            plot_type = st.selectbox(
-                'Plot type', ['U-Matrix', 'Activation Response', 'Training Feature Space Map', 'Source Name Visualization', 'Main Type Visualization', 'Feature Visualization'], help='Select the type of visualization to display')
-        else:
-            plot_type = st.selectbox(
-                'Plot type', ['U-Matrix', 'Activation Response', 'Training Feature Space Map', 'Source Name Visualization', 'Feature Visualization'], help='Select the type of visualization to display')
+
+        plot_type = st.selectbox(
+            'Plot type', ['U-Matrix', 'Activation Response', 'Training Feature Space Map', 'Source Name Visualization', 'Main Type Visualization', 'Feature Visualization'], help='Select the type of visualization to display')
 
         plot_submit = st.form_submit_button('Show plot')
 
@@ -251,7 +251,7 @@ if st.session_state.SOM_loaded:
                             category_map = project_feature(
                                 st.session_state.som, X, st.session_state.raw_df['name'], sources)
                             category_plot_sources_hex(category_map)
-            elif plot_type == 'Main Type Visualization' and not new_df:
+            elif plot_type == 'Main Type Visualization':
                 if st.session_state.som.topology == 'rectangular':
                     vis_type_string = 'Rectangular'
                 elif st.session_state.som.topology == 'hexagonal':
@@ -281,18 +281,18 @@ if st.session_state.SOM_loaded:
                     if st.session_state.som.topology == 'rectangular':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources(
-                                st.session_state.som, main_type_, st.session_state.main_type_df, X, 'main_type')
+                                st.session_state.som, main_type_, st.session_state.raw_df, X, 'main_type')
                         elif visualization_type == 'Rectangular':
                             category_map = project_feature(
-                                st.session_state.som, X, st.session_state.main_type_df['main_type'], main_type_)
+                                st.session_state.som, X, st.session_state.raw_df['main_type'], main_type_)
                             category_plot_sources(category_map)
                     elif st.session_state.som.topology == 'hexagonal':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources_hex(
-                                st.session_state.som, main_type_, st.session_state.main_type_df, X, 'main_type')
+                                st.session_state.som, main_type_, st.session_state.raw_df, X, 'main_type')
                         elif visualization_type == 'Hexbin':
                             category_map = project_feature(
-                                st.session_state.som, X, st.session_state.main_type_df['main_type'], main_type_)
+                                st.session_state.som, X, st.session_state.raw_df['main_type'], main_type_)
                             category_plot_sources_hex(category_map)
             elif plot_type == 'Feature Visualization':
                 dataset_choice = st.radio(
