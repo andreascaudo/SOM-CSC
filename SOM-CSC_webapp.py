@@ -100,7 +100,7 @@ else:
     # SOM parameters7
     st.sidebar.write('Select the SOM hyperparameters')
     dim = st.sidebar.slider(
-        'Dimension', 6, 100, 30, help='The map\'s dimensions will be [dim x dim], forming a square layout.')
+        'Dimension', 6, 100, 40, help='The map\'s dimensions will be [dim x dim], forming a square layout.')
     sigma = st.sidebar.slider('Sigma', 0.01, 5.0, 3.8,
                               help='The spread of the neighborhood function')
     learning_rate = st.sidebar.slider(
