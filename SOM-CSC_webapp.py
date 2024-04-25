@@ -181,12 +181,12 @@ if st.session_state.SOM_loaded:
                     plot_activation_response(st.session_state.som, X)
                 else:
                     plot_activation_response_hex(st.session_state.som, X)
-            elif plot_type == 'Feature Space Map':
-                # Feature Space Map
-                st.write('## Feature Space Map')
+            elif plot_type == 'Training Feature Space Map':
+                # Training Feature Space Map
+                st.write('## Training Feature Space Map')
                 with st.expander("See explanation"):
                     st.write(
-                        'The Feature Space Map visualization tool enables the user to apply color coding to the pre-trained SOM based on the weights of the neurons.')
+                        'The Training Feature Space Map visualization tool enables the user to apply color coding to the pre-trained SOM based on the weights of the neurons.')
                     st.write(
                         'If the user selects one or more features, the map will be colored according to the mean of the selected features across the map.')
                     st.write(
