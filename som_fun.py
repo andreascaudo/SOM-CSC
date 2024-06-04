@@ -429,16 +429,7 @@ def scatter_plot_sources_hex(som, sources, raw_df, X, column_name):
     X_sources_name = raw_df[column_name][idx]
     X_sources = X[idx]
 
-    w_x = []
-    w_y = []
-    for cnt, x in enumerate(X_sources):
-        # getting the winner
-        w = som.winner(x)
-        # place a marker on the winning position for the sample xx
-        wx, wy = som.convert_map_to_euclidean(w)
-        # wy = wy * np.sqrt(3) / 2
-        w_x.append(wx)
-        w_y.append(wy)
+    w_x, w_y = zip(*[som.winner(d) for d in X_sources])
 
     w_x = np.array(w_x, dtype=float)
     w_y = np.array(w_y, dtype=float)
