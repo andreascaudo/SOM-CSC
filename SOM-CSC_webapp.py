@@ -6,6 +6,7 @@ from minisom import MiniSom
 import pickle
 import time
 from som_fun import *
+from tools import *
 import glob
 import os
 
@@ -35,31 +36,20 @@ elif st.session_state.SOM_loaded == False:
 
 # sidebar for the dataset
 st.sidebar.header('User input')
-new_df = st.sidebar.toggle('Dataset version 2.1', True)
 
 # toogle to select new vs old dataset
 # new dataset
-if new_df:
-    raw_dataset_path = './data/csc21_mastertable_clean_observationlevel_xmatchSimbad1arcsec_log_norm/'
-else:
-    # old dataset
-    raw_dataset_path = './data/cluster_csc_simbad.csv'
-    dataset_path = './data/cluster_csc_simbad_log_normalized.csv'
-
-# Load the dataset
-if raw_dataset_path.endswith('.csv'):
-    st.session_state.raw_df = pd.read_csv(raw_dataset_path)
-else:
-    st.session_state.raw_df = load_split_csvs(raw_dataset_path)
-
-if not new_df:
-    st.session_state.df = pd.read_csv(dataset_path)
-else:
-    st.session_state.df = st.session_state.raw_df[['hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
-                                                   'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm', 'var_newq_b_log_norm']]
-    # remove log_norm from the columns name
-    st.session_state.df.columns = st.session_state.df.columns.str.replace(
-        '_log_norm', '')
+raw_dataset_path = './data/csc21_mastertable_clean_observationlevel_xmatchSimbad1arcsec_log_norm_id/'
+st.session_state.raw_df = load_split_csvs(raw_dataset_path)
+st.session_state.df = st.session_state.raw_df[['hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
+                                               'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm', 'var_newq_b_log_norm']]
+st.session_state.df_index = st.session_state.raw_df[['id', 'hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
+                                                     'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm', 'var_newq_b_log_norm']]
+# remove log_norm from the columns name
+st.session_state.df.columns = st.session_state.df.columns.str.replace(
+    '_log_norm', '')
+st.session_state.df_index.columns = st.session_state.df_index.columns.str.replace(
+    '_log_norm', '')
 
 # GMM_cluster_labels = st.session_state.df['cluster']
 main_type = st.session_state.raw_df['main_type']
@@ -81,21 +71,26 @@ if som_model is not None:
     topology = st.session_state.som.topology
     st.session_state.df = st.session_state.df[features]
     X = st.session_state.df.to_numpy()
+
+    index_features = ['id'].append(features)
+    st.session_state.df_index = st.session_state.df_index[index_features]
+    X_index = st.session_state.df_index.to_numpy()
 else:
     # Features selection
     st.sidebar.write(
         '..or select the features and parameters for training the SOM')
     features = list(st.session_state.df.columns)
-    if not new_df:
-        default_features = list(
-            st.session_state.df.columns.drop('cluster').drop('var_newq_b'))
-    else:
-        default_features = list(
-            st.session_state.df.columns.drop('var_newq_b'))
+    default_features = list(
+        st.session_state.df.columns.drop('var_newq_b'))
     features = st.sidebar.multiselect(
         'Features', features, default_features, help='Select the features to be used for training the SOM.')
+    index_features = ['id'] + features
+
     st.session_state.df = st.session_state.df[features]
     X = st.session_state.df.to_numpy()
+
+    st.session_state.df_index = st.session_state.df_index[index_features]
+    X_index = st.session_state.df_index.to_numpy()
 
     # SOM parameters7
     st.sidebar.write('Select the SOM hyperparameters')
@@ -146,12 +141,9 @@ else:
                             st.session_state.t_error, len(st.session_state.q_error))
             except:
                 pass
-        # Download the SOM model as well as the features used to train it
-        st.write('## Download the SOM model')
-        st.download_button(
-            label="Download", data=pickle.dumps([st.session_state.som, features]), file_name='SOM_model.pkl', mime='application/octet-stream', help='Download the SOM model store it and to upload it later')
 
 if st.session_state.SOM_loaded:
+    activation_map_flag = False
     with st.form(key='plot_form'):
         st.write('## Select the plot to be displayed')
 
@@ -161,6 +153,10 @@ if st.session_state.SOM_loaded:
         plot_submit = st.form_submit_button('Show plot')
 
         if plot_submit:
+            if plot_type not in ['Source Name Visualization', 'Main Type Visualization']:
+                log_option = st.checkbox(
+                    'Logarithmic scale', value=False, help='Use a logarithmic scale for the color map')
+                type_option = 'log' if log_option else 'linear'
             if plot_type == 'U-Matrix':
                 # U-Matrix
                 st.write('## U-Matrix')
@@ -168,9 +164,10 @@ if st.session_state.SOM_loaded:
                     st.write(
                         'The U-Matrix is a visualization tool that represents the distance between neurons in the SOM. It is a 2D grid where each cell is colored based on the distance between the neurons. The U-Matrix is a useful tool to visualize the topology of the SOM and identify clusters of neurons.')
                 if st.session_state.som.topology == 'rectangular':
-                    plot_rectangular_u_matrix(st.session_state.som)
+                    plot_rectangular_u_matrix(
+                        st.session_state.som, type_option)
                 else:
-                    plot_u_matrix_hex(st.session_state.som)
+                    plot_u_matrix_hex(st.session_state.som, type_option)
             elif plot_type == 'Activation Response':
                 # Activation Response
                 st.write('## Activation Response')
@@ -178,9 +175,12 @@ if st.session_state.SOM_loaded:
                     st.write(
                         'The Activation Response visualization tool enables the user to visualize the frequency of samples that are assigned to each neuron. The color of each neuron will indicate the number of times that neuron was identified as the best matching unit for a sample.')
                 if st.session_state.som.topology == 'rectangular':
-                    plot_activation_response(st.session_state.som, X)
+                    activation_map = plot_activation_response(
+                        st.session_state.som, X_index, type_option)
                 else:
-                    plot_activation_response_hex(st.session_state.som, X)
+                    activation_map = plot_activation_response_hex(
+                        st.session_state.som, X_index, type_option)
+                activation_map_flag = True
             elif plot_type == 'Training Feature Space Map':
                 # Training Feature Space Map
                 st.write('## Training Feature Space Map')
@@ -206,9 +206,9 @@ if st.session_state.SOM_loaded:
                     :, :, features_index]
                 if len(features_index) > 0:
                     if st.session_state.som.topology == 'rectangular':
-                        feature_space_map_plot(weights)
+                        feature_space_map_plot(weights, type_option)
                     else:
-                        feature_space_map_plot_hex(weights)
+                        feature_space_map_plot_hex(weights, type_option)
 
             elif plot_type == 'Source Name Visualization':
                 if st.session_state.som.topology == 'rectangular':
@@ -228,13 +228,17 @@ if st.session_state.SOM_loaded:
                     st.write('***' +
                              vis_type_string + ' visualization:*** The color of each neuron will indicate the source name that appears most frequently within that neuron.')
                 # Category plot
+                name_counts = st.session_state.raw_df['name'].value_counts()
+                sorted_names = [f"{name} [{count}]" for name,
+                                count in name_counts.items()]
                 sources = st.multiselect(
-                    'Select sources name', st.session_state.raw_df['name'].unique())
+                    'Select sources name [number of detections]', sorted_names)
                 visualization_type = st.radio(
                     'Visualization type', ['Scatter', vis_type_string])
                 st.write(
                     "###### To update the map with the name of the selected sources, please click the 'Show Plot' button again.")
                 if len(sources) > 0:
+                    sources = [source.split(' [')[0] for source in sources]
                     if st.session_state.som.topology == 'rectangular':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources(
@@ -315,9 +319,9 @@ if st.session_state.SOM_loaded:
                     var = project_feature(
                         st.session_state.som, X, st.session_state.raw_df[feature])
                     if st.session_state.som.topology == 'rectangular':
-                        features_plot(var, scaling=scaling)
+                        features_plot(var, type_option, scaling=scaling)
                     else:
-                        features_plot_hex(var, scaling=scaling)
+                        features_plot_hex(var, type_option, scaling=scaling)
                 elif dataset_choice == 'Upload a new dataset':
                     with st.expander("See explanation"):
                         st.write('This visualization tool enables coloring of the pre-trained SOM based on data from a newly uploaded dataset, allowing users to dynamically select which feature to use for coloring. Users have the flexibility to upload a new dataset and choose a specific feature that will be applied to color the previously trained SOM.')
@@ -367,6 +371,17 @@ if st.session_state.SOM_loaded:
                                     "Dataset validation failed. Please check the column names and ensure there are no empty values.")
                         except Exception as e:
                             st.error(f"An error occurred: {e}")
+
+    # Download the SOM model as well as the features used to train it
+    st.write('## Download')
+    st.download_button(
+        label="Download the SOM model", data=pickle.dumps([st.session_state.som, features]), file_name='SOM_model.pkl', mime='application/octet-stream', help='Download the SOM model store it and to upload it later')
+    st.download_button(
+        label="Download the raw dataset", data=st.session_state.raw_df.to_csv(index=False), file_name='raw_dataset.csv', mime='text/csv', help='Download the raw dataset')
+    if activation_map_flag:
+        activation_map_csv = dict_to_csv(activation_map)
+        st.download_button(
+            label="Download the activation response map", data=activation_map_csv, file_name='activation_response.csv', mime='text/csv', help='Download the activation response')
 else:
     st.write(
         'Please load a SOM model or generate a new one to visualize the map.')

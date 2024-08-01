@@ -61,7 +61,7 @@ def plot_errors(q_error, t_error, iterations):
     st.altair_chart(c, use_container_width=True)
 
 
-def plot_rectangular_u_matrix(som):
+def plot_rectangular_u_matrix(som, color_type='linear'):
     u_matrix = som.distance_map().T
     u_matrix = pd.DataFrame(
         u_matrix, columns=range(1, len(u_matrix)+1), index=range(1, len(u_matrix)+1))
@@ -76,7 +76,7 @@ def plot_rectangular_u_matrix(som):
         y=alt.Y('y:O', sort=alt.EncodingSortField(
             'y', order='descending'), title=''),
         color=alt.Color(
-            'value:Q', scale=alt.Scale(scheme='lightmulti'))
+            'value:Q', scale=alt.Scale(type=color_type, scheme='lightmulti'))
     ).properties(
         width=600,
         height=600
@@ -91,7 +91,7 @@ new_dimensions = np.arange(6, 101, 1)
 new_sizes = np.interp(new_dimensions, dimensions, sizes)
 
 
-def plot_u_matrix_hex(som):
+def plot_u_matrix_hex(som, color_type='linear'):
     u_matrix = som.distance_map().T
     som_shape = som.get_weights().shape
     u_matrix = pd.DataFrame(
@@ -106,6 +106,9 @@ def plot_u_matrix_hex(som):
     min_y = u_matrix['y'].min()
     max_y = u_matrix['y'].max()
 
+    min_value = u_matrix['value'][u_matrix['value'] > 0].min()
+    max_value = u_matrix['value'].max()
+
     # get index from new_dimensions
     index = np.where(new_dimensions == som_shape[0])[0][0]
     size = new_sizes[index]
@@ -119,8 +122,8 @@ def plot_u_matrix_hex(som):
             'y', order='descending'), title='',  scale=alt.Scale(domain=[min_y-1, max_y+1])).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
         color=alt.Color(
             'value:Q', scale=alt.Scale(scheme='lightmulti')),
-        fill=alt.Color('value:Q', scale=alt.Scale(
-            scheme='lightmulti')).legend(orient='bottom'),
+        fill=alt.Fill('value:Q', scale=alt.Scale(type=color_type, domain=(
+            min_value, max_value), scheme='lightmulti')).legend(orient='bottom'),
         stroke=alt.value('black'),
         strokeWidth=alt.value(1.0)
     ).transform_calculate(
@@ -136,7 +139,20 @@ def plot_u_matrix_hex(som):
     st.altair_chart(c, use_container_width=True)
 
 
-def plot_activation_response(som, X):
+def download_activation_response(som, data):
+    # return a list with the id for each winning row for each 2D map
+    a_dict = {}
+    for x in data:
+        if som.winner(x[1:]) in a_dict:
+            a_dict[som.winner(x[1:])].append(x[0])
+        else:
+            a_dict[som.winner(x[1:])] = [x[0]]
+
+    return a_dict
+
+
+def plot_activation_response(som, X_index, color_type='linear'):
+    X = X_index[:, 1:]
     activation_map = som.activation_response(X)
     activation_map = pd.DataFrame(
         activation_map, columns=range(1, len(activation_map)+1), index=range(1, len(activation_map)+1))
@@ -145,25 +161,27 @@ def plot_activation_response(som, X):
     activation_map = activation_map.reset_index()
     activation_map = activation_map.rename(columns={'index': 'y'})
 
-    min_x = activation_map['x'].min()
-    max_x = activation_map['x'].max()
-    min_y = activation_map['y'].min()
-    max_y = activation_map['y'].max()
+    min_value = activation_map['value'][activation_map['value'] > 0].min()
+    max_value = activation_map['value'].max()
 
     c = alt.Chart(activation_map).mark_rect().encode(
         x=alt.X('x:O', title=''),
         y=alt.Y('y:O', sort=alt.EncodingSortField(
-            'y', order='descending'), title=''),
+            'y'), title=''),
         color=alt.Color(
-            'value:Q', scale=alt.Scale(scheme='lightmulti'))
+            'value:Q',
+            scale=alt.Scale(type=color_type, domain=(min_value, max_value), scheme='lightmulti'))
     ).properties(
         width=600,
         height=600
     )
     st.altair_chart(c, use_container_width=True)
 
+    return download_activation_response(som, X_index)
 
-def plot_activation_response_hex(som, X):
+
+def plot_activation_response_hex(som, X_index, color_type='linear'):
+    X = X_index[:, 1:]
     activation_map = som.activation_response(X)
     activation_map = pd.DataFrame(
         activation_map, columns=range(1, len(activation_map)+1), index=range(1, len(activation_map)+1))
@@ -176,6 +194,9 @@ def plot_activation_response_hex(som, X):
     max_x = activation_map['x'].max()
     min_y = activation_map['y'].min()
     max_y = activation_map['y'].max()
+
+    min_value = activation_map['value'][activation_map['value'] > 0].min()
+    max_value = activation_map['value'].max()
 
     # get index from new_dimensions
     index = np.where(new_dimensions == som.get_weights().shape[0])[0][0]
@@ -189,8 +210,8 @@ def plot_activation_response_hex(som, X):
             'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
         color=alt.Color(
             'value:Q', scale=alt.Scale(scheme='lightmulti')),
-        fill=alt.Color('value:Q', scale=alt.Scale(
-            scheme='lightmulti')).legend(orient='bottom'),
+        fill=alt.Fill('value:Q', scale=alt.Scale(type=color_type, domain=(
+            min_value, max_value), scheme='lightmulti')).legend(orient='bottom'),
         stroke=alt.value('black'),
         strokeWidth=alt.value(1.0)
     ).transform_calculate(
@@ -205,8 +226,10 @@ def plot_activation_response_hex(som, X):
     )
     st.altair_chart(c, use_container_width=True)
 
+    return download_activation_response(som, X_index)
 
-def feature_space_map_plot(weights):
+
+def feature_space_map_plot(weights, color_type='linear'):
     # plot the mean of the weights across lass dimension
     mean_weights = np.mean(weights, axis=2)
     mean_weights = pd.DataFrame(mean_weights, columns=range(
@@ -216,12 +239,16 @@ def feature_space_map_plot(weights):
     mean_weights = mean_weights.reset_index()
     mean_weights = mean_weights.rename(columns={'index': 'y'})
 
+    min_value = mean_weights['value'][mean_weights['value'] > 0].min()
+    max_value = mean_weights['value'].max()
+
     c = alt.Chart(mean_weights).mark_rect().encode(
         x=alt.X('x:O', title=''),
         y=alt.Y('y:O', sort=alt.EncodingSortField(
             'y', order='descending'), title=''),
         color=alt.Color(
-            'value:Q', scale=alt.Scale(scheme='lightmulti'))
+            'value:Q',
+            scale=alt.Scale(type=color_type, domain=(min_value, max_value), scheme='lightmulti'))
     ).properties(
         width=600,
         height=600
@@ -229,7 +256,7 @@ def feature_space_map_plot(weights):
     st.altair_chart(c, use_container_width=True)
 
 
-def feature_space_map_plot_hex(weights):
+def feature_space_map_plot_hex(weights, color_type='linear'):
     # plot the mean of the weights across lass dimension
     mean_weights = np.mean(weights, axis=2)
     mean_weights = pd.DataFrame(mean_weights, columns=range(
@@ -244,6 +271,9 @@ def feature_space_map_plot_hex(weights):
     min_y = mean_weights['y'].min()
     max_y = mean_weights['y'].max()
 
+    min_value = mean_weights['value'][mean_weights['value'] > 0].min()
+    max_value = mean_weights['value'].max()
+
     # get index from new_dimensions
     index = np.where(new_dimensions == weights.shape[0])[0][0]
     size = new_sizes[index]
@@ -256,8 +286,8 @@ def feature_space_map_plot_hex(weights):
             'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
         color=alt.Color(
             'value:Q', scale=alt.Scale(scheme='lightmulti')),
-        fill=alt.Color('value:Q', scale=alt.Scale(
-            scheme='lightmulti')).legend(orient='bottom'),
+        fill=alt.Fill('value:Q', scale=alt.Scale(type=color_type, domain=(
+            min_value, max_value), scheme='lightmulti')).legend(orient='bottom'),
         stroke=alt.value('black'),
         strokeWidth=alt.value(1.0)
     ).transform_calculate(
@@ -494,6 +524,7 @@ def project_feature(som, X, feature, source=None):
             if not feature[cnt] in source:
                 continue
         w = som.winner(xx)
+
         if map[w[0]][w[1]][0] == None:
             map[w[0]][w[1]] = [feature[cnt]]
         else:
@@ -738,7 +769,7 @@ def category_plot_clustering(map):
     st.altair_chart(scatter_chart_sample, use_container_width=True)
 
 
-def features_plot_hex(map, scaling=sum):
+def features_plot_hex(map, color_type, scaling=sum):
     '''
     Plot the map (which is a list) of the external feature, different scaling methods are available:
     - sum
@@ -793,7 +824,7 @@ def features_plot_hex(map, scaling=sum):
     else:
         raise ValueError('scaling method not recognized')
 
-    np_map = pd.DataFrame(np_map.T, columns=range(
+    np_map = pd.DataFrame(np_map, columns=range(
         1, len(np_map)+1), index=range(1, len(np_map)+1))
 
     np_map = np_map.melt(
@@ -806,6 +837,9 @@ def features_plot_hex(map, scaling=sum):
     max_x = np_map['x'].max()
     min_y = np_map['y'].min()
     max_y = np_map['y'].max()
+
+    min_value = np_map['value'][np_map['value'] > 0].min()
+    max_value = np_map['value'].max()
 
     # get index from new_dimensions
     index = np.where(new_dimensions == len(map))[0][0]
@@ -821,8 +855,8 @@ def features_plot_hex(map, scaling=sum):
                 domain=[min_y-1, max_y+1])).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
         color=alt.Color(
             'value:Q', scale=alt.Scale(scheme='lightmulti', type='pow')),
-        fill=alt.Color('value:Q', scale=alt.Scale(
-            scheme='lightmulti')).legend(orient='bottom'),
+        fill=alt.Fill('value:Q', scale=alt.Scale(type=color_type, domain=(
+            min_value, max_value), scheme='lightmulti')).legend(orient='bottom'),
         stroke=alt.value('black'),
         strokeWidth=alt.value(1.0)
     ).transform_calculate(
@@ -838,7 +872,7 @@ def features_plot_hex(map, scaling=sum):
     st.altair_chart(c, use_container_width=True)
 
 
-def features_plot(map, scaling=sum):
+def features_plot(map, color_type, scaling=sum):
     '''
     Plot the map (which is a list) of the external feature, different scaling methods are available:
     - sum
@@ -892,7 +926,7 @@ def features_plot(map, scaling=sum):
                     np_map[idx_outer][idx_inner] = 0
     else:
         raise ValueError('scaling method not recognized')
-    np_map = pd.DataFrame(np_map.T, columns=range(
+    np_map = pd.DataFrame(np_map, columns=range(
         1, len(np_map)+1), index=range(1, len(np_map)+1))
     np_map = np_map.melt(
         var_name='x', value_name='value', ignore_index=False)
@@ -904,7 +938,7 @@ def features_plot(map, scaling=sum):
         y=alt.Y('y:O', sort=alt.EncodingSortField(
             'y', order='descending'), title=''),
         color=alt.Color(
-            'value:Q', scale=alt.Scale(scheme='lightmulti')).legend(orient='bottom')
+            'value:Q', scale=alt.Scale(type=color_type, scheme='lightmulti'))
     ).properties(
         height=750
     )
