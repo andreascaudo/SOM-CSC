@@ -39,7 +39,7 @@ st.sidebar.header('User input')
 
 # toogle to select new vs old dataset
 # new dataset
-raw_dataset_path = './data/csc21_mastertable_clean_observationlevel_xmatchSimbad1arcsec_log_norm_id/'
+raw_dataset_path = './data/csc211_mastertable_clean_observationlevel_COMPLETE_xmatchSimbad1arcsec_log_norm_id/'
 st.session_state.raw_df = load_split_csvs(raw_dataset_path)
 st.session_state.df = st.session_state.raw_df[['hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
                                                'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm', 'var_newq_b_log_norm']]
@@ -52,11 +52,12 @@ st.session_state.df_index.columns = st.session_state.df_index.columns.str.replac
     '_log_norm', '')
 
 # GMM_cluster_labels = st.session_state.df['cluster']
-main_type = st.session_state.raw_df['main_type']
+simbad_type = 'main_type'  # otype
+main_type = st.session_state.raw_df[simbad_type]
 # default_main_type = ['QSO', 'AGN', 'Seyfert_1', 'Seyfert_2', 'HMXB',
 #                     'LMXB', 'XB', 'YSO', 'TTau*', 'Orion_V*']
 
-default_main_type = ['YSO', 'XB', 'Seyfert', 'AGN']
+default_main_type = ['YSO', 'HighMassXBin', 'LowMassXBin', 'Seyfert', 'AGN']
 
 # Let the user load a SOM model
 som_model = st.sidebar.file_uploader(
@@ -285,18 +286,18 @@ if st.session_state.SOM_loaded:
                     if st.session_state.som.topology == 'rectangular':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources(
-                                st.session_state.som, main_type_, st.session_state.raw_df, X, 'main_type')
+                                st.session_state.som, main_type_, st.session_state.raw_df, X, simbad_type)
                         elif visualization_type == 'Rectangular':
                             category_map = project_feature(
-                                st.session_state.som, X, st.session_state.raw_df['main_type'], main_type_)
+                                st.session_state.som, X, st.session_state.raw_df[simbad_type], main_type_)
                             category_plot_sources(category_map)
                     elif st.session_state.som.topology == 'hexagonal':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources_hex(
-                                st.session_state.som, main_type_, st.session_state.raw_df, X, 'main_type')
+                                st.session_state.som, main_type_, st.session_state.raw_df, X, simbad_type)
                         elif visualization_type == 'Hexbin':
                             category_map = project_feature(
-                                st.session_state.som, X, st.session_state.raw_df['main_type'], main_type_)
+                                st.session_state.som, X, st.session_state.raw_df[simbad_type], main_type_)
                             category_plot_sources_hex(category_map)
             elif plot_type == 'Feature Visualization':
                 dataset_choice = st.radio(
