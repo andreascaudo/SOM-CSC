@@ -57,7 +57,7 @@ main_type = st.session_state.raw_df[simbad_type]
 # default_main_type = ['QSO', 'AGN', 'Seyfert_1', 'Seyfert_2', 'HMXB',
 #                     'LMXB', 'XB', 'YSO', 'TTau*', 'Orion_V*']
 
-default_main_type = ['YSO', 'HighMassXBin', 'LowMassXBin', 'Seyfert', 'AGN']
+default_main_type = ['YSO', 'XrayBin', 'Seyfert', 'AGN']
 
 # Let the user load a SOM model
 som_model = st.sidebar.file_uploader(
@@ -102,11 +102,11 @@ else:
     learning_rate = st.sidebar.slider(
         'Learning rate', 0.01, 5.0, 1.8, help='The degree of weight updates')
     iterations = st.sidebar.slider(
-        'Iterations', 10, 1000, 500, help='Number of training iterations')
+        'Iterations', 10, 1000, 1000, help='Number of training iterations')
     topology = st.sidebar.selectbox(
         'Topology', ['hexagonal', 'rectangular'], help='Topology of the neurons in the SOM grid')
     seed = st.sidebar.number_input(
-        'Seed', 0, 10000, 1234, help='Seed for reproducibility')
+        'Seed', 0, 10000, 4444, help='Seed for reproducibility')
     # tick box to skip the calculation of errors at each step
     skip_errors = st.sidebar.checkbox(
         'Skip QE and TE computation at each step', value=True, help='Skip the computation of quantization and topographic errors at each step to reduce training duration. Deselect this option to gain insights into the required number of iterations for effective SOM training.')
