@@ -82,7 +82,8 @@ def get_variability(name_ids, id_to_pos, min_detections):
                 pairwise_distances.append(distance)
 
             # Compute the mean pairwise distance as the variability metric
-            variability = sum(pairwise_distances) / len(pairwise_distances)
+            variability = np.round(
+                sum(pairwise_distances) / len(pairwise_distances), 2)
 
         # Collect the variability metrics
         variability_list.append((source_name, variability))
