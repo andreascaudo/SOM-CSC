@@ -5,6 +5,7 @@ from minisom import MiniSom
 import streamlit as st
 import altair as alt
 import math
+import itertools
 
 
 def train_som(X, x, y, input_len, sigma, learning_rate, train_iterations, topology, seed):
@@ -59,6 +60,34 @@ def plot_errors(q_error, t_error, iterations):
         height=400
     )
     st.altair_chart(c, use_container_width=True)
+
+
+def get_variability(name_ids, id_to_pos, min_detections):
+    variability_list = []
+    for source_name, source_ids in name_ids.items():
+        # Retrieve positions of the source's detections
+        positions = [id_to_pos[id_] for id_ in source_ids if id_ in id_to_pos]
+
+        if len(positions) < min_detections:
+            continue  # Skip if not enough valid detections
+
+        # If there are fewer than 2 positions, variability is zero
+        if len(positions) < 2:
+            variability = 0
+        else:
+            # Compute all pairwise distances
+            pairwise_distances = []
+            for (x1, y1), (x2, y2) in itertools.combinations(positions, 2):
+                distance = math.hypot(x2 - x1, y2 - y1)
+                pairwise_distances.append(distance)
+
+            # Compute the mean pairwise distance as the variability metric
+            variability = sum(pairwise_distances) / len(pairwise_distances)
+
+        # Collect the variability metrics
+        variability_list.append((source_name, variability))
+
+    return variability_list
 
 
 def plot_rectangular_u_matrix(som, color_type='linear'):

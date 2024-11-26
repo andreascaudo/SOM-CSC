@@ -9,6 +9,7 @@ from som_fun import *
 from tools import *
 import glob
 import os
+import matplotlib.pyplot as plt
 
 
 def load_split_csvs(directory):
@@ -149,7 +150,7 @@ if st.session_state.SOM_loaded:
         st.write('## Select the plot to be displayed')
 
         plot_type = st.selectbox(
-            'Plot type', ['U-Matrix', 'Activation Response', 'Training Feature Space Map', 'Source Name Visualization', 'Main Type Visualization', 'Feature Visualization'], help='Select the type of visualization to display')
+            'Plot type', ['U-Matrix', 'Activation Response', 'Training Feature Space Map', 'Source Name Visualization', 'Source Variability Visualization', 'Main Type Visualization', 'Feature Visualization'], help='Select the type of visualization to display')
 
         plot_submit = st.form_submit_button('Show plot')
 
@@ -256,6 +257,70 @@ if st.session_state.SOM_loaded:
                             category_map = project_feature(
                                 st.session_state.som, X, st.session_state.raw_df['name'], sources)
                             category_plot_sources_hex(category_map)
+            elif plot_type == 'Source Variability Visualization':
+                if st.session_state.som.topology == 'rectangular':
+                    vis_type_string = 'Rectangular'
+                elif st.session_state.som.topology == 'hexagonal':
+                    vis_type_string = 'Hexbin'
+
+                name_counts = st.session_state.raw_df['name'].value_counts()
+                max_counts = int(name_counts[0])
+                min_detections = st.slider(
+                    'Minimum Detections', 2, max_counts, 3, help='')
+                id_to_pos = {}  # Dictionary to store the mapping from IDs to positions
+                for id_ in st.session_state.raw_df['id']:
+                    position = st.session_state.som.winner(X[id_])
+                    id_to_pos[id_] = position
+
+                name_ids = st.session_state.raw_df.groupby(
+                    'name')['id'].apply(list).to_dict()
+
+                variability_list = get_variability(
+                    name_ids, id_to_pos, min_detections)
+                variability_values = [variability for _,
+                                      variability in variability_list]
+
+                # Plot the histogram of all normalized variability values
+                fig, ax = plt.subplots(figsize=(10, 6))
+                ax.hist(variability_values, bins=30,
+                        edgecolor='black', alpha=0.7)
+                ax.set_title('Histogram of Source Normalized Variabilities')
+                ax.set_xlabel(
+                    'Normalized Variability (Mean Pairwise Distance / Max Distance)')
+                ax.set_ylabel('Number of Sources')
+                ax.grid(axis='y', alpha=0.75)
+                # Display the plot in Streamlit
+                with st.expander("Show Variability Distribution"):
+                    st.pyplot(fig)
+
+                variability_list.sort(key=lambda x: x[1], reverse=True)
+                variability_ms = [
+                    f"{name[0]} [{name[1]}]" for name in variability_list]
+                sources = st.multiselect(
+                    'Select sources name [Variability index]', variability_ms)
+                visualization_type = st.radio(
+                    'Visualization type', ['Scatter', vis_type_string])
+                st.write(
+                    "###### To update the map with the name of the selected sources, please click the 'Show Plot' button again.")
+                if len(sources) > 0:
+                    sources = [source.split(' [')[0] for source in sources]
+                    if st.session_state.som.topology == 'rectangular':
+                        if visualization_type == 'Scatter':
+                            scatter_plot_sources(
+                                st.session_state.som, sources, st.session_state.raw_df, X, 'name')
+                        elif visualization_type == 'Rectangular':
+                            category_map = project_feature(
+                                st.session_state.som, X, st.session_state.raw_df['name'], sources)
+                            category_plot_sources(category_map)
+                    elif st.session_state.som.topology == 'hexagonal':
+                        if visualization_type == 'Scatter':
+                            scatter_plot_sources_hex(
+                                st.session_state.som, sources, st.session_state.raw_df, X, 'name')
+                        elif visualization_type == 'Hexbin':
+                            category_map = project_feature(
+                                st.session_state.som, X, st.session_state.raw_df['name'], sources)
+                            category_plot_sources_hex(category_map)
+
             elif plot_type == 'Main Type Visualization':
                 if st.session_state.som.topology == 'rectangular':
                     vis_type_string = 'Rectangular'
