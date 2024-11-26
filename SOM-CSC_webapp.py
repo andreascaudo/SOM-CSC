@@ -286,7 +286,7 @@ if st.session_state.SOM_loaded:
                         edgecolor='black', alpha=0.7)
                 ax.set_title('Histogram of Source Normalized Variabilities')
                 ax.set_xlabel(
-                    'Normalized Variability (Mean Pairwise Distance / Max Distance)')
+                    'Variability')
                 ax.set_ylabel('Number of Sources')
                 ax.grid(axis='y', alpha=0.75)
                 # Display the plot in Streamlit
