@@ -284,7 +284,7 @@ if st.session_state.SOM_loaded:
                 fig, ax = plt.subplots(figsize=(10, 6))
                 ax.hist(variability_values, bins=30,
                         edgecolor='black', alpha=0.7)
-                ax.set_title('Histogram of Source Normalized Variabilities')
+                ax.set_title('Histogram of Source Variabilities')
                 ax.set_xlabel(
                     'Variability')
                 ax.set_ylabel('Number of Sources')
