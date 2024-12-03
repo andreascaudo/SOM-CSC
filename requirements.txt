@@ -4,5 +4,4 @@ pandas
 numpy
 MiniSom
 matplotlib
-sklearn
-defaultdict
+scikit-learn
