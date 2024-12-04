@@ -402,27 +402,15 @@ if st.session_state.SOM_loaded:
                     var = project_feature(
                         st.session_state.som, X, st.session_state.raw_df[feature])
 
-                    is_string = True
-                    for sublist in var:
-                        for sublist2 in sublist:
-                            for value in sublist2:
-                                if value is not None and not isinstance(value, str):
-                                    print(value)
-                                    print(type(value))
-                                    is_string = False
-                                    break
-                            if not is_string:
-                                break
-                        if not is_string:
-                            break
+                    is_string_var = is_string(var)
 
                     if st.session_state.som.topology == 'rectangular':
-                        if is_string:
+                        if is_string_var:
                             category_plot_sources(var)
                         else:
                             features_plot(var, type_option, scaling=scaling)
                     else:
-                        if is_string:
+                        if is_string_var:
                             category_plot_sources_hex(var)
                         else:
                             features_plot_hex(
@@ -444,43 +432,52 @@ if st.session_state.SOM_loaded:
                             '*...*')
                         st.write(
                             '*xn, yn, zn, n*')
-                if st.session_state.SOM_loaded:
-                    uploaded_file = st.file_uploader(
-                        "Upload your CSV file", type="csv")
-                    scaling = st.selectbox(
-                        'Upload Scaling', ['mean', 'min', 'max', 'sum', 'median', 'std'])
-                    st.write(
-                        "###### Please click the 'Show Plot' button after choosing the dataset type or to display the map, in order to refresh the view.")
-                    if uploaded_file is not None:
-                        # Attempt to load and validate the dataset
-                        # try:
-                        # Assuming a new function 'validate_and_load_dataset' in som_fun.py
-                        dataset = validate_and_load_dataset(
-                            uploaded_file, features)
-                        feature_to_trans_and_norm = [
-                            'powlaw_gamma', 'bb_kt', 'var_ratio_b', 'var_ratio_h', 'var_ratio_s']
-                        dataset[feature_to_trans_and_norm] = transform_and_normalize(
-                            dataset[feature_to_trans_and_norm], st.session_state.df_to_norm)
-                        # All rows, only the last column
-                        Xx = dataset.iloc[:, :-1].to_numpy()
-                        feature = dataset.iloc[:, -1]
+                    if st.session_state.SOM_loaded:
+                        uploaded_file = st.file_uploader(
+                            "Upload your CSV file", type="csv")
+                        scaling = st.selectbox(
+                            'Upload Scaling', ['mean', 'min', 'max', 'sum', 'median', 'std'])
+                        st.write(
+                            "###### Please click the 'Show Plot' button after choosing the dataset type or to display the map, in order to refresh the view.")
+                        if uploaded_file is not None:
+                            # Attempt to load and validate the dataset
+                            # try:
+                            # Assuming a new function 'validate_and_load_dataset' in som_fun.py
+                            dataset = validate_and_load_dataset(
+                                uploaded_file, features)
+                            feature_to_trans_and_norm = [
+                                'powlaw_gamma', 'bb_kt', 'var_ratio_b', 'var_ratio_h', 'var_ratio_s']
+                            dataset[feature_to_trans_and_norm] = transform_and_normalize(
+                                dataset[feature_to_trans_and_norm], st.session_state.df_to_norm)
+                            # All rows, only the last column
+                            Xx = dataset.iloc[:, :-1].to_numpy()
+                            feature = dataset.iloc[:, -1]
 
-                        if dataset is not None:
-                            st.session_state['new_dataset'] = dataset
-                            # Call to project_feature and features_plot goes here, using the new dataset
-                            var = project_feature(
-                                st.session_state.som, Xx, feature)
-                            if st.session_state.som.topology == 'rectangular':
-                                features_plot(var, type_option,
-                                              scaling=scaling)
+                            if dataset is not None:
+                                st.session_state['new_dataset'] = dataset
+                                # Call to project_feature and features_plot goes here, using the new dataset
+                                var = project_feature(
+                                    st.session_state.som, Xx, feature)
+                                is_string_var = is_string(var)
+
+                                if st.session_state.som.topology == 'rectangular':
+                                    if is_string_var:
+                                        category_plot_sources(var)
+                                    else:
+                                        features_plot(
+                                            var, type_option, scaling=scaling)
+                                else:
+                                    if is_string_var:
+                                        category_plot_sources_hex(
+                                            var)
+                                    else:
+                                        features_plot_hex(
+                                            var, type_option, scaling=scaling)
                             else:
-                                features_plot_hex(
-                                    var, type_option, scaling=scaling)
-                        else:
-                            st.error(
-                                "Dataset validation failed. Please check the column names and ensure there are no empty values.")
-                        # except Exception as e:
-                        #    st.error(f"An error occurred: {e}")
+                                st.error(
+                                    "Dataset validation failed. Please check the column names and ensure there are no empty values.")
+                            # except Exception as e:
+                            #    st.error(f"An error occurred: {e}")
 
     # Add a checkbox for enabling download options
     if st.session_state.som.topology == 'hexagonal':
@@ -545,6 +542,10 @@ if st.session_state.SOM_loaded:
                     # classify = False
                     dataset_classified = update_dataset_to_classify(
                         dataset_toclassify, assignments_central, assignments_neighbor)
+
+                    st.session_state.dataset_classified = dataset_classified[['id', 'assigned_class_central',
+                                                                             'confidence_central', 'assigned_class_neighbor', 'confidence_neighbor', 'is_classified']]
+
                     classification_results = describe_classified_dataset(
                         dataset_classified, assignments_central, assignments_neighbor)
 
@@ -625,10 +626,6 @@ if st.session_state.SOM_loaded:
                             st.write(
                                 "Histogram of Confidence Levels for Neighbor Neurons")
                             fig, ax = plt.subplots(figsize=(10, 6))
-                            print(
-                                max(classification_results['confidence_levels_neighbor']))
-                            print(
-                                min(classification_results['confidence_levels_neighbor']))
                             bin = np.arange(start=-0.5, stop=(6+1), step=1)
                             ax.hist(classification_results['confidence_levels_neighbor'], bins=bin, color='green',
                                     edgecolor='black', alpha=0.7)
@@ -673,6 +670,15 @@ if st.session_state.SOM_loaded:
                     mime='text/csv',
                     help='Download the activation response'
                 )
+                if 'dataset_classified' in st.session_state:
+                    st.download_button(
+                        label="Download the classification results",
+                        data=st.session_state.dataset_classified.to_csv(
+                            index=False),
+                        file_name='dataset_classified.csv',
+                        mime='text/csv',
+                        help='Download the classification results'
+                    )
 else:
     st.write(
         'Please load a SOM model or generate a new one to visualize the map.')

@@ -10,6 +10,17 @@ import math
 import itertools
 
 
+def is_string(var):
+    is_string = True
+    for sublist in var:
+        for sublist2 in sublist:
+            for value in sublist2:
+                if value is not None and not isinstance(value, str):
+                    is_string = False
+                    return is_string
+    return is_string
+
+
 def train_som(X, x, y, input_len, sigma, learning_rate, train_iterations, topology, seed):
     # initialization
     som = MiniSom(x=x, y=y, input_len=input_len,
@@ -99,28 +110,28 @@ def get_hex_neighbors(i, j, max_i, max_j):
     neighbors = []
 
     # Determine if the row is even or odd
-    even = (i % 2 == 0)
+    even = (j % 2 == 0)
 
     # Define neighbor offsets based on row parity
     if even:
         # Even rows
         neighbor_offsets = [
-            (i - 1, j),     # Up
-            (i - 1, j + 1),  # Up-Right
-            (i, j + 1),     # Right
-            (i + 1, j + 1),  # Down-Right
-            (i + 1, j),     # Down
-            (i, j - 1),     # Left
+            (i - 1, j),     # Left
+            (i, j + 1),  # Up-Left
+            (i + 1, j + 1),     # Up-Right
+            (i + 1, j),  # Right
+            (i + 1, j - 1),     # Down-Right
+            (i, j - 1),     # Down-Left
         ]
     else:
         # Odd rows
         neighbor_offsets = [
-            (i - 1, j - 1),  # Up-Left
-            (i - 1, j),     # Up
-            (i, j + 1),     # Right
-            (i + 1, j),     # Down
-            (i + 1, j - 1),  # Down-Left
-            (i, j - 1),     # Left
+            (i - 1, j),  # Left
+            (i - 1, j + 1),     # Up-Left
+            (i, j + 1),     # Up-Right
+            (i + 1, j),     # Right
+            (i, j - 1),  # Down-Right
+            (i - 1, j - 1),     # Down-Left
         ]
 
     # Filter out invalid neighbors (outside grid bounds)
@@ -601,12 +612,14 @@ def project_feature(som, X, feature, source=None):
             map[w[0]][w[1]] = [feature[cnt]]
         else:
             map[w[0]][w[1]].append(feature[cnt])
+
     return map
 
 
-def category_plot_sources(_map):
+def category_plot_sources(_map, flip=True):
 
-    _map = list(map(list, zip(*_map)))
+    if flip:
+        _map = list(map(list, zip(*_map)))
     '''
     plot the most common element in the list
     '''
@@ -649,8 +662,9 @@ def category_plot_sources(_map):
     st.altair_chart(scatter_chart_sample, use_container_width=True)
 
 
-def category_plot_sources_hex(_map):
-    _map = list(map(list, zip(*_map)))
+def category_plot_sources_hex(_map, flip=True):
+    if flip:
+        _map = list(map(list, zip(*_map)))
     '''
     plot the most common element in the list
     '''
@@ -841,7 +855,9 @@ def category_plot_clustering(map):
     st.altair_chart(scatter_chart_sample, use_container_width=True)
 
 
-def features_plot_hex(map, color_type, scaling=sum):
+def features_plot_hex(_map, color_type, scaling=sum, flip=True):
+    if flip:
+        _map = list(map(list, zip(*_map)))
     '''
     Plot the map (which is a list) of the external feature, different scaling methods are available:
     - sum
@@ -850,45 +866,45 @@ def features_plot_hex(map, color_type, scaling=sum):
     - min
     - median
     '''
-    np_map = np.empty((len(map), len(map[0])))
+    np_map = np.empty((len(_map), len(_map[0])))
 
     if scaling == 'sum':
-        for idx_outer, sublist_outer in enumerate(map):
+        for idx_outer, sublist_outer in enumerate(_map):
             for idx_inner, sublist in enumerate(sublist_outer):
                 try:
                     np_map[idx_outer][idx_inner] = sum(sublist)
                 except TypeError:
                     np_map[idx_outer][idx_inner] = np.nan
     elif scaling == 'mean':
-        for idx_outer, sublist_outer in enumerate(map):
+        for idx_outer, sublist_outer in enumerate(_map):
             for idx_inner, sublist in enumerate(sublist_outer):
                 try:
                     np_map[idx_outer][idx_inner] = np.mean(sublist)
                 except TypeError:
                     np_map[idx_outer][idx_inner] = np.nan
     elif scaling == 'max':
-        for idx_outer, sublist_outer in enumerate(map):
+        for idx_outer, sublist_outer in enumerate(_map):
             for idx_inner, sublist in enumerate(sublist_outer):
                 try:
                     np_map[idx_outer][idx_inner] = max(sublist)
                 except TypeError:
                     np_map[idx_outer][idx_inner] = np.nan
     elif scaling == 'min':
-        for idx_outer, sublist_outer in enumerate(map):
+        for idx_outer, sublist_outer in enumerate(_map):
             for idx_inner, sublist in enumerate(sublist_outer):
                 try:
                     np_map[idx_outer][idx_inner] = min(sublist)
                 except TypeError:
                     np_map[idx_outer][idx_inner] = np.nan
     elif scaling == 'median':
-        for idx_outer, sublist_outer in enumerate(map):
+        for idx_outer, sublist_outer in enumerate(_map):
             for idx_inner, sublist in enumerate(sublist_outer):
                 try:
                     np_map[idx_outer][idx_inner] = np.median(sublist)
                 except TypeError:
                     np_map[idx_outer][idx_inner] = np.nan
     elif scaling == 'std':
-        for idx_outer, sublist_outer in enumerate(map):
+        for idx_outer, sublist_outer in enumerate(_map):
             for idx_inner, sublist in enumerate(sublist_outer):
                 try:
                     np_map[idx_outer][idx_inner] = np.std(sublist)
@@ -915,7 +931,7 @@ def features_plot_hex(map, color_type, scaling=sum):
     max_value = np_map['value'].max()
 
     # get index from new_dimensions
-    index = np.where(new_dimensions == len(map))[0][0]
+    index = np.where(new_dimensions == len(_map))[0][0]
     size = new_sizes[index]
 
     hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
@@ -945,7 +961,9 @@ def features_plot_hex(map, color_type, scaling=sum):
     st.altair_chart(c, use_container_width=True)
 
 
-def features_plot(map, color_type, scaling=sum):
+def features_plot(_map, color_type, scaling=sum, flip=True):
+    if flip:
+        _map = list(map(list, zip(*_map)))
     '''
     Plot the map (which is a list) of the external feature, different scaling methods are available:
     - sum
@@ -954,44 +972,44 @@ def features_plot(map, color_type, scaling=sum):
     - min
     - median
     '''
-    np_map = np.empty((len(map), len(map[0])))
+    np_map = np.empty((len(_map), len(_map[0])))
     if scaling == 'sum':
-        for idx_outer, sublist_outer in enumerate(map):
+        for idx_outer, sublist_outer in enumerate(_map):
             for idx_inner, sublist in enumerate(sublist_outer):
                 try:
                     np_map[idx_outer][idx_inner] = sum(sublist)
                 except TypeError:
                     np_map[idx_outer][idx_inner] = 0
     elif scaling == 'mean':
-        for idx_outer, sublist_outer in enumerate(map):
+        for idx_outer, sublist_outer in enumerate(_map):
             for idx_inner, sublist in enumerate(sublist_outer):
                 try:
                     np_map[idx_outer][idx_inner] = np.mean(sublist)
                 except TypeError:
                     np_map[idx_outer][idx_inner] = 0
     elif scaling == 'max':
-        for idx_outer, sublist_outer in enumerate(map):
+        for idx_outer, sublist_outer in enumerate(_map):
             for idx_inner, sublist in enumerate(sublist_outer):
                 try:
                     np_map[idx_outer][idx_inner] = max(sublist)
                 except TypeError:
                     np_map[idx_outer][idx_inner] = 0
     elif scaling == 'min':
-        for idx_outer, sublist_outer in enumerate(map):
+        for idx_outer, sublist_outer in enumerate(_map):
             for idx_inner, sublist in enumerate(sublist_outer):
                 try:
                     np_map[idx_outer][idx_inner] = min(sublist)
                 except TypeError:
                     np_map[idx_outer][idx_inner] = 0
     elif scaling == 'median':
-        for idx_outer, sublist_outer in enumerate(map):
+        for idx_outer, sublist_outer in enumerate(_map):
             for idx_inner, sublist in enumerate(sublist_outer):
                 try:
                     np_map[idx_outer][idx_inner] = np.median(sublist)
                 except TypeError:
                     np_map[idx_outer][idx_inner] = 0
     elif scaling == 'std':
-        for idx_outer, sublist_outer in enumerate(map):
+        for idx_outer, sublist_outer in enumerate(_map):
             for idx_inner, sublist in enumerate(sublist_outer):
                 try:
                     np_map[idx_outer][idx_inner] = np.std(sublist)
@@ -1146,6 +1164,7 @@ def get_classification(som_map_id, dataset_toclassify, simbad_dataset, SIMBAD_cl
         id_ = row['id']
         if id_ not in id_to_pos:
             continue  # Skip if ID not in id_to_pos
+
         pos = som.winner(row[dataset_toclassify.columns[1:]].to_numpy())
 
         i, j = pos  # Extract grid coordinates
@@ -1164,7 +1183,10 @@ def get_classification(som_map_id, dataset_toclassify, simbad_dataset, SIMBAD_cl
                     'position': pos
                 })
         # Central neuron doesn't meet criteria, check neighbors
+        print(id_)
+        print(pos)
         neighbors = get_hex_neighbors(i, j, dim, dim)
+        print(neighbors)
         neighbors_classes = []
         for neighbor_pos in neighbors:
             if neighbor_pos in neuron_class_distribution_neighbor:
