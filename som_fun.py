@@ -1183,10 +1183,7 @@ def get_classification(som_map_id, dataset_toclassify, simbad_dataset, SIMBAD_cl
                     'position': pos
                 })
         # Central neuron doesn't meet criteria, check neighbors
-        print(id_)
-        print(pos)
         neighbors = get_hex_neighbors(i, j, dim, dim)
-        print(neighbors)
         neighbors_classes = []
         for neighbor_pos in neighbors:
             if neighbor_pos in neuron_class_distribution_neighbor:
