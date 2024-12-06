@@ -485,6 +485,47 @@ if st.session_state.SOM_loaded:
                                             help="Check this box to apply classification")
         if enable_classification:
             with st.form(key='classification_form'):
+                with st.expander("See explanation"):
+                    st.write("This tool provides the functionality to classify detections that lack a cross-match in the SIMBAD dataset or belong to a new set of detections that can be uploaded (See below for more details on this). Classification is performed at two levels:")
+
+                    st.write("1. **Central Neuron Classification**: For every detection, the Best Matching Unit (BMU) is identified, and the most frequent class within that neuron is assigned. Users can set thresholds for:")
+                    st.write(
+                        """
+                        <ul style="margin-left: 20px;">
+                            <li>The minimum number of detections the neuron must contain.</li>
+                            <li>The minimum percentage of detections within the neuron that must belong to the majority class for confident assignment.</li>
+                        </ul>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
+                    st.write("2. **Neighbor Neuron Classification**: Since neighboring neurons are close in the feature space, this method assigns the most frequent class among them. Parameters for this classification include:")
+                    st.write(
+                        """
+                        <ul style="margin-left: 20px;">
+                            <li>The minimum number of detections required in each neuron to be included in the analysis.</li>
+                            <li>The minimum number of neighboring neurons that must share the same majority class to confidently assign it.</li>
+                        </ul>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                    st.write(
+                        "Both classification methods are handled independently, and their results can be downloaded in the download section below.")
+
+                    st.write(
+                        '⚠️ **The uploaded file must to be a .csv file with a specific structure:** ⚠️')
+                    st.write(
+                        'The columns should contain the features utilized for training the SOM.')
+                    st.write(
+                        '**A, B, C,**')
+                    st.write(
+                        '*x1, y1, z1*')
+                    st.write(
+                        '*x2, y2, z2*')
+                    st.write(
+                        '*...*')
+                    st.write(
+                        '*xN, yN, zN,*')
                 dataset_toclassify = None
                 st.write("Apply classification")
                 parameters_classification = {}
