@@ -354,8 +354,18 @@ if st.session_state.SOM_loaded:
                     st.write('***' +
                              vis_type_string + ' visualization:*** The color of each neuron will indicate the main type that appears most frequently within that neuron.')
                 # Scatter plot
+
+                main_type_counts = main_type.value_counts()
+                default_main_type_counts = []
+                for default in default_main_type:
+                    default_main_type_counts.append(
+                        f"{default} [{main_type_counts[default]}]")
+                sorted_main_type = [f"{name} [{count}]" for name,
+                                    count in main_type_counts.items()]
+
                 main_type_ = st.multiselect(
-                    'Main type', np.unique(main_type.dropna()).tolist(), default_main_type)
+                    'Main type [Number of detections]', sorted_main_type, default_main_type_counts)
+                main_type_ = [mt.split(' [')[0] for mt in main_type_]
                 visualization_type = st.radio(
                     'Visualization type', ['Scatter', vis_type_string])
 
