@@ -103,7 +103,7 @@ else:
     learning_rate = st.sidebar.slider(
         'Learning rate', 0.01, 5.0, 1.8, help='The degree of weight updates')
     iterations = st.sidebar.slider(
-        'Iterations', 0, 100000, 10000, 1000, help='Number of training iterations')
+        'Iterations', 0, 1000000, 10000, 1000, help='Number of training iterations')
     topology = st.sidebar.selectbox(
         'Topology', ['hexagonal', 'rectangular'], help='Topology of the neurons in the SOM grid')
     seed = st.sidebar.number_input(
