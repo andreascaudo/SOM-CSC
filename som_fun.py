@@ -725,6 +725,10 @@ def category_plot_sources_hex(_map, flip=True):
         width=600,
     ).configure_view(
         strokeWidth=0
+    ).configure_legend(
+        symbolStrokeWidth=1.0,  # Adjust the stroke width of legend symbols
+        # Adjust the size of legend symbols (default is 100)
+        symbolSize=size**2
     )
     st.write('## SOM category plot')
     st.altair_chart(c, use_container_width=True)
@@ -800,6 +804,10 @@ def category_plot_clustering_hex(map):
         width=600,
     ).configure_view(
         strokeWidth=0
+    ).configure_legend(
+        symbolStrokeWidth=1.0,  # Adjust the stroke width of legend symbols
+        # Adjust the size of legend symbols (default is 100)
+        symbolSize=size**2
     )
     st.write('## SOM category plot')
     st.altair_chart(c, use_container_width=True)
@@ -956,6 +964,14 @@ def features_plot_hex(_map, color_type, scaling=sum, flip=True):
         height=750,
     ).configure_view(
         strokeWidth=0
+    ).configure_legend(
+        symbolStrokeWidth=1.0,  # Adjust the stroke width of legend symbols
+        # Adjust the size of legend symbols (default is 100)
+        symbolSize=size**2
+    ).configure_legend(
+        symbolStrokeWidth=1.0,  # Adjust the stroke width of legend symbols
+        # Adjust the size of legend symbols (default is 100)
+        symbolSize=size**2
     )
     st.write('## SOM feature plot')
     st.altair_chart(c, use_container_width=True)
