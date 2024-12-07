@@ -36,10 +36,10 @@ def train_som(X, x, y, input_len, sigma, learning_rate, train_iterations, topolo
     return som
 
 
-def get_iterations_index(X, dim_number, features, sigma, learning_rate, max_iter=1000, errors_bar=None):
+def get_iterations_index(X, dim_number, features, sigma, learning_rate, max_iter=1000, topology='rectangular', errors_bar=None):
 
     som = MiniSom(dim_number, dim_number, features, sigma=sigma,
-                  learning_rate=learning_rate, neighborhood_function='gaussian')
+                  learning_rate=learning_rate, topology=topology, neighborhood_function='gaussian')
 
     q_error = []
     t_error = []
@@ -51,7 +51,10 @@ def get_iterations_index(X, dim_number, features, sigma, learning_rate, max_iter
         rand_i = np.random.randint(len(X))
         som.update(X[rand_i], som.winner(X[rand_i]), i, max_iter)
         q_error.append(som.quantization_error(X))
-        t_error.append(som.topographic_error(X))
+        if topology == "rectangular":
+            t_error.append(som.topographic_error(X))
+        elif topology == "hexagonal":
+            t_error.append(topographic_error_hex(som, X))
 
     return q_error, t_error
 
@@ -140,6 +143,38 @@ def get_hex_neighbors(i, j, max_i, max_j):
             neighbors.append((ni, nj))
 
     return neighbors
+
+
+def topographic_error_hex(som, data):
+    """
+    Computes the topographic error for the given MiniSom 'som' object and input 'data'.
+    Supports both rectangular and hexagonal topologies. For hexagonal topology, uses the
+    'get_hex_neighbors' function to determine adjacency.
+    """
+    # Ensure data length is correct
+    som._check_input_len(data)
+
+    total_neurons = np.prod(som._activation_map.shape)
+    if total_neurons == 1:
+        return np.nan
+
+    # Compute best and second-best matching units
+    b2mu_inds = np.argsort(som._distance_from_weights(data), axis=1)[:, :2]
+    b2mu_xy = np.unravel_index(b2mu_inds, som._weights.shape[:2])
+    b2mu_x, b2mu_y = b2mu_xy[0], b2mu_xy[1]
+
+    rows, cols = som._weights.shape[:2]
+
+    if som.topology == 'hexagonal':
+        errors = 0
+        for i in range(len(data)):
+            bmu_x, bmu_y = b2mu_x[i, 0], b2mu_y[i, 0]    # best unit
+            sbmu_x, sbmu_y = b2mu_x[i, 1], b2mu_y[i, 1]  # second-best unit
+
+            neighbors = get_hex_neighbors(bmu_x, bmu_y, rows, cols)
+            if (sbmu_x, sbmu_y) not in neighbors:
+                errors += 1
+        return errors / len(data)
 
 
 def plot_rectangular_u_matrix(som, color_type='linear'):

@@ -103,7 +103,7 @@ else:
     learning_rate = st.sidebar.slider(
         'Learning rate', 0.01, 5.0, 1.8, help='The degree of weight updates')
     iterations = st.sidebar.slider(
-        'Iterations', 10, 1000, 1000, help='Number of training iterations')
+        'Iterations', 0, 1000000, 10000, 5000, help='Number of training iterations')
     topology = st.sidebar.selectbox(
         'Topology', ['hexagonal', 'rectangular'], help='Topology of the neurons in the SOM grid')
     seed = st.sidebar.number_input(
@@ -120,7 +120,7 @@ else:
             errors_bar = st.progress(
                 0, text="Getting quantization and topographic errors")
             st.session_state.q_error, st.session_state.t_error = get_iterations_index(X, dim, len(
-                features), sigma, learning_rate, iterations, errors_bar)
+                features), sigma, learning_rate, iterations, topology, errors_bar)
             errors_bar.empty()
 
             plot_errors(st.session_state.q_error,
@@ -130,7 +130,6 @@ else:
         with st.spinner('Training the SOM...'):
             st.session_state.som = train_som(X, dim, dim, len(features), sigma,
                                              learning_rate, iterations, topology, seed)
-            # baloons
             st.session_state.SOM_loaded = True
             st.session_state.SOM_loaded_trining = True
             st.balloons()
@@ -143,6 +142,18 @@ else:
                             st.session_state.t_error, len(st.session_state.q_error))
             except:
                 pass
+        else:
+            # Display quantization error
+            quantization_error = st.session_state.som.quantization_error(X)
+            st.write(f"**Quantization Error:** {quantization_error:.4f}")
+            # Display topographic error based on topology
+            if topology == "rectangular":
+                topographic_error = st.session_state.som.topographic_error(X)
+            elif topology == "hexagonal":
+                topographic_error = topographic_error_hex(
+                    st.session_state.som, X)
+            st.write(
+                f"**Topographic Error:** {topographic_error:.4f}")
 
 if st.session_state.SOM_loaded:
     activation_map_flag = False
