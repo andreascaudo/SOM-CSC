@@ -503,7 +503,7 @@ if st.session_state.SOM_loaded:
                         """
                         <ul style="margin-left: 20px;">
                             <li>The minimum number of detections that the top 3 classes within the neuron must contain.</li>
-                            <li>The minimum percentage of detections from the top 3 classes within the neuron that must belong to the majority class for confident assignment.</li>
+                            <li>The minimum percentage of detections that the majority class must have relative to the top 3 classes within the neuron to be classified.</li>
                         </ul>
                         """,
                         unsafe_allow_html=True
@@ -514,7 +514,7 @@ if st.session_state.SOM_loaded:
                         """
                         <ul style="margin-left: 20px;">
                             <li>The minimum number of detections from the top 3 classes required within each neuron to be included in the analysis.</li>
-                            <li>The minimum number of neighboring neurons that must share the same majority class to confidently assign it.</li>
+                            <li>The minimum number of neighboring neurons that must share the same majority class.</li>
                         </ul>
                         """,
                         unsafe_allow_html=True
