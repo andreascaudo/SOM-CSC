@@ -128,8 +128,17 @@ else:
 
         # PLEASE WAIT
         with st.spinner('Training the SOM...'):
-            st.session_state.som = train_som(X, dim, dim, len(features), sigma,
-                                             learning_rate, iterations, topology, seed)
+            best_qe = 1
+            for it in range(100, iterations, 1000):
+                st.session_state.som = train_som(X, dim, dim, len(features), sigma,
+                                                 learning_rate, it, topology, seed)
+                temp_qe = st.session_state.som.quantization_error(X)
+                if temp_qe < best_qe:
+                    best_qe = temp_qe
+                    st.write(it)
+                    st.write(best_qe)
+                    st.write(topographic_error_hex(st.session_state.som, X))
+
             st.session_state.SOM_loaded = True
             st.session_state.SOM_loaded_trining = True
             st.balloons()

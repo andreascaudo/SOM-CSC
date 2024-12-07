@@ -32,7 +32,7 @@ def train_som(X, x, y, input_len, sigma, learning_rate, train_iterations, topolo
     som.train_random(X, train_iterations)  # training with 100 iterations
     # end time
     end = time.time()
-    st.write('SOM trained in time:', end - start, 'seconds')
+    # st.write('SOM trained in time:', end - start, 'seconds')
     return som
 
 
