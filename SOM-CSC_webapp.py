@@ -129,7 +129,7 @@ else:
         # PLEASE WAIT
         with st.spinner('Training the SOM...'):
             best_qe = 1
-            for it in range(60100, iterations, 1000):
+            for it in range(112100, iterations, 1000):
                 st.session_state.som = train_som(X, dim, dim, len(features), sigma,
                                                  learning_rate, it, topology, seed)
                 temp_qe = st.session_state.som.quantization_error(X)
