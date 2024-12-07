@@ -1156,8 +1156,10 @@ def get_classification(som_map_id, dataset_toclassify, simbad_dataset, SIMBAD_cl
     neuron_class_distribution_central = {}
     neuron_class_distribution_neighbor = {}
     for pos, classes in neuron_class_map.items():
-        total = len(classes)
-        class_counts = pd.Series(classes).value_counts()
+        # The top 3 classes shoud meet the minimum detection count,
+        # and calculate the threshold based exclusively on these top 3 classes.
+        class_counts = pd.Series(classes).value_counts()[:3]
+        total = class_counts.sum()
         class_proportions = class_counts / total
         if total >= parameters_classification['min_detections_per_neuron']:
             neuron_class_distribution_central[pos] = {

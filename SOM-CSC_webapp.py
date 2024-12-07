@@ -502,8 +502,8 @@ if st.session_state.SOM_loaded:
                     st.write(
                         """
                         <ul style="margin-left: 20px;">
-                            <li>The minimum number of detections the neuron must contain.</li>
-                            <li>The minimum percentage of detections within the neuron that must belong to the majority class for confident assignment.</li>
+                            <li>The minimum number of detections that the top 3 classes within the neuron must contain.</li>
+                            <li>The minimum percentage of detections from the top 3 classes within the neuron that must belong to the majority class for confident assignment.</li>
                         </ul>
                         """,
                         unsafe_allow_html=True
@@ -513,7 +513,7 @@ if st.session_state.SOM_loaded:
                     st.write(
                         """
                         <ul style="margin-left: 20px;">
-                            <li>The minimum number of detections required in each neuron to be included in the analysis.</li>
+                            <li>The minimum number of detections from the top 3 classes required within each neuron to be included in the analysis.</li>
                             <li>The minimum number of neighboring neurons that must share the same majority class to confidently assign it.</li>
                         </ul>
                         """,
