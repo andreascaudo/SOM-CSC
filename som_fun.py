@@ -44,7 +44,10 @@ def get_iterations_index(X, dim_number, features, sigma, learning_rate, max_iter
     q_error = []
     t_error = []
 
-    for i in range(max_iter):
+    step_count = 100
+    step_size = max_iter // step_count
+
+    for i in range(0, max_iter, step_size):
         # get percentage of the progress from tqdm
         errors_bar.progress(
             i/max_iter, text="Getting quantization and topographic errors")
