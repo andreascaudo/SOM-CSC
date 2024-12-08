@@ -9,6 +9,7 @@ import os
 import matplotlib.pyplot as plt
 
 
+@st.cache_data
 def load_split_csvs(directory):
     all_files = sorted(glob.glob(os.path.join(directory, '*.csv')))
     df_list = [pd.read_csv(file) for file in all_files]
@@ -38,7 +39,8 @@ st.sidebar.header('User input')
 # toogle to select new vs old dataset
 # new dataset
 raw_dataset_path = './data/csc211_mastertable_clean_observationlevel_COMPLETE_xmatchSimbad1arcsec_log_norm_id/'
-st.session_state.raw_df = load_split_csvs(raw_dataset_path)
+if ['raw_df'] not in st.session_state:
+    st.session_state.raw_df = load_split_csvs(raw_dataset_path)
 st.session_state.df = st.session_state.raw_df[['hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
                                                'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm', 'var_newq_b_log_norm']]
 st.session_state.df_index = st.session_state.raw_df[['id', 'hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
@@ -103,7 +105,7 @@ else:
     learning_rate = st.sidebar.slider(
         'Learning rate', 0.01, 5.0, 1.8, help='The degree of weight updates')
     iterations = st.sidebar.slider(
-        'Iterations', 0, 1000000, 10000, 1000, help='Number of training iterations')
+        'Iterations', 0, 1000000, 51100, 100, help='Number of training iterations')
     topology = st.sidebar.selectbox(
         'Topology', ['hexagonal', 'rectangular'], help='Topology of the neurons in the SOM grid')
     seed = st.sidebar.number_input(
