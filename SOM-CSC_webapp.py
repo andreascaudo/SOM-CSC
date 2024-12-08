@@ -130,17 +130,8 @@ else:
 
         # PLEASE WAIT
         with st.spinner('Training the SOM...'):
-            best_it = 0
-            st.session_state.best_qe = []
-            st.session_state.best_te = []
-            for it in range(50000, 60000, 100):
-                print(it)
-                st.session_state.som = train_som(X, dim, dim, len(features), sigma,
-                                                 learning_rate, it, topology, seed)
-                temp_qe = st.session_state.som.quantization_error(X)
-                temp_te = topographic_error_hex(st.session_state.som, X)
-                st.session_state.best_qe.append(temp_qe)
-                st.session_state.best_te.append(temp_te)
+            st.session_state.som = train_som(X, dim, dim, len(features), sigma,
+                                             learning_rate, iterations, topology, seed)
 
             st.session_state.SOM_loaded = True
             st.session_state.SOM_loaded_trining = True
@@ -166,9 +157,6 @@ else:
                     st.session_state.som, X)
             st.write(
                 f"**Topographic Error:** {topographic_error:.4f}")
-
-            st.write(st.session_state.best_qe)
-            st.write(st.session_state.best_te)
 
 if st.session_state.SOM_loaded:
     activation_map_flag = False
