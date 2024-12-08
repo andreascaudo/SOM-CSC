@@ -292,7 +292,7 @@ if st.session_state.SOM_loaded:
                              " Visualization:*** The color of each neuron represents the source name that appears most frequently within that neuron.")
 
                 name_counts = st.session_state.raw_df['name'].value_counts()
-                max_counts = int(name_counts[0])
+                max_counts = int(name_counts.iloc[0])
                 min_detections = st.slider(
                     'Minimum Detections', 2, max_counts, 10, help='')
                 id_to_pos = {}  # Dictionary to store the mapping from IDs to positions
