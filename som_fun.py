@@ -36,37 +36,101 @@ def train_som(X, x, y, input_len, sigma, learning_rate, train_iterations, topolo
     return som
 
 
-def get_iterations_index(X, dim_number, features, sigma, learning_rate, max_iter=1000, topology='rectangular', errors_bar=None):
+def build_iteration_indexes(data_len, num_iterations, random_generator=None):
+    """Builds iteration indexes for training."""
+    # Generate sequential indexes, looping over the dataset
+    iterations = np.arange(num_iterations) % data_len
 
-    som = MiniSom(dim_number, dim_number, features, sigma=sigma,
-                  learning_rate=learning_rate, topology=topology, neighborhood_function='gaussian')
+    # Shuffle if a random generator is provided
+    if random_generator:
+        random_generator.shuffle(iterations)
 
-    q_error = []
+    return iterations
+
+
+def train_and_track_error(som, data, num_iteration, progress_bar, steps, random_order=False):
+    """
+    Trains the SOM and tracks errors at 10 intervals.
+
+    Parameters
+    ----------
+    som : MiniSom
+        The Self-Organizing Map instance.
+
+    data : np.array or list
+        Data matrix.
+
+    num_iteration : int
+        Maximum number of iterations (one iteration per sample).
+
+    random_order : bool (default=False)
+        If True, samples are picked in random order.
+        Otherwise, the samples are picked sequentially.
+
+    Returns
+    -------
+    som : MiniSom
+        The trained SOM.
+
+    q_error : list
+        List of quantization errors recorded at 10 intervals during training.
+    """
+    # Input validation
+    som._check_iteration_number(num_iteration)
+    som._check_input_len(data)
+
+    # Initialize variables
+    random_generator = None
+    if random_order:
+        random_generator = som._random_generator
+
+    iterations = build_iteration_indexes(
+        len(data), num_iteration, random_generator)
+    q_error = []  # To store quantization errors
     t_error = []
 
-    step_count = 100
-    step_size = max_iter // step_count
+    # Main training loop
+    for t, iteration in enumerate(iterations):
+        som.update(data[iteration], som.winner(
+            data[iteration]), t, num_iteration)
 
-    for i in range(0, max_iter, step_size):
-        # get percentage of the progress from tqdm
-        errors_bar.progress(
-            i/max_iter, text="Getting quantization and topographic errors")
-        rand_i = np.random.randint(len(X))
-        som.update(X[rand_i], som.winner(X[rand_i]), i, max_iter)
-        q_error.append(som.quantization_error(X))
-        if topology == "rectangular":
-            t_error.append(som.topographic_error(X))
-        elif topology == "hexagonal":
-            t_error.append(topographic_error_hex(som, X))
+        progress_fraction = (t + 1) / num_iteration
+        progress_bar.progress(
+            progress_fraction, text=f"Training... {t + 1}/{num_iteration} iterations"
+        )
 
-    return q_error, t_error
+        # Record quantization error at steps intervals (including the last iteration)
+        if t % (num_iteration // steps) == 0 or t == num_iteration - 1:
+            q_error.append(som.quantization_error(data))
+            if som.topology == "rectangular":
+                t_error.append(som.topographic_error(data))
+            elif som.topology == "hexagonal":
+                t_error.append(topographic_error_hex(som, data))
+
+    return som, q_error, t_error
 
 
-def plot_errors(q_error, t_error, iterations):
+def get_iterations_index(X, x, y, input_len, sigma, learning_rate, max_iter=1000, topology='rectangular', seed=None, steps=100, errors_bar=None):
+    # Initialize RandomState for reproducibility
+    rng = np.random.RandomState(seed)
+
+    # Initialize SOM
+    som = MiniSom(x=x, y=y, input_len=input_len, sigma=sigma,
+                  learning_rate=learning_rate, topology=topology, random_seed=seed)
+    som.random_weights_init(X)
+
+    som, q_error, t_error = train_and_track_error(
+        som, X, max_iter, errors_bar, steps, random_order=True)
+
+    return som, q_error, t_error
+
+
+def plot_errors(q_error, t_error, iterations, steps=100):
     st.write('## Quantization error and Topographic error')
     # Plot using st the quantization error and the topographic error togheter
+    step_size = iterations // steps
     errors_data = pd.DataFrame(
-        {'Iterations': range(1, iterations+1), 'Quantization error': q_error, 'Topographic error': t_error})
+        {'Iterations': range(0, iterations+1, step_size), 'Quantization error': q_error, 'Topographic error': t_error})
     errors_data_melted = errors_data.melt(
         'Iterations', var_name='Errors', value_name='Value')
 

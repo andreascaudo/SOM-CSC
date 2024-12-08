@@ -121,17 +121,17 @@ else:
         if not skip_errors:
             errors_bar = st.progress(
                 0, text="Getting quantization and topographic errors")
-            st.session_state.q_error, st.session_state.t_error = get_iterations_index(X, dim, len(
-                features), sigma, learning_rate, iterations, topology, errors_bar)
-            errors_bar.empty()
 
-            plot_errors(st.session_state.q_error,
-                        st.session_state.t_error, iterations)
+            st.session_state.steps = 100
+            st.session_state.som, st.session_state.q_error, st.session_state.t_error = get_iterations_index(X, dim, dim, len(features), sigma,
+                                                                                                            learning_rate, iterations, topology, seed, st.session_state.steps, errors_bar=errors_bar)
+            errors_bar.empty()
 
         # PLEASE WAIT
         with st.spinner('Training the SOM...'):
-            st.session_state.som = train_som(X, dim, dim, len(features), sigma,
-                                             learning_rate, iterations, topology, seed)
+            if 'som' not in st.session_state:
+                st.session_state.som = train_som(X, dim, dim, len(features), sigma,
+                                                 learning_rate, iterations, topology, seed)
 
             st.session_state.SOM_loaded = True
             st.session_state.SOM_loaded_trining = True
@@ -142,21 +142,20 @@ else:
         if not skip_errors:
             try:
                 plot_errors(st.session_state.q_error,
-                            st.session_state.t_error, len(st.session_state.q_error))
+                            st.session_state.t_error, iterations, st.session_state.steps)
             except:
                 pass
-        else:
-            # Display quantization error
-            quantization_error = st.session_state.som.quantization_error(X)
-            st.write(f"**Quantization Error:** {quantization_error:.4f}")
-            # Display topographic error based on topology
-            if topology == "rectangular":
-                topographic_error = st.session_state.som.topographic_error(X)
-            elif topology == "hexagonal":
-                topographic_error = topographic_error_hex(
-                    st.session_state.som, X)
-            st.write(
-                f"**Topographic Error:** {topographic_error:.4f}")
+        # Display quantization error
+        quantization_error = st.session_state.som.quantization_error(X)
+        st.write(f"**Quantization Error:** {quantization_error:.4f}")
+        # Display topographic error based on topology
+        if topology == "rectangular":
+            topographic_error = st.session_state.som.topographic_error(X)
+        elif topology == "hexagonal":
+            topographic_error = topographic_error_hex(
+                st.session_state.som, X)
+        st.write(
+            f"**Topographic Error:** {topographic_error:.4f}")
 
 if st.session_state.SOM_loaded:
     activation_map_flag = False
