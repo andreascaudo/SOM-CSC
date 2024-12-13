@@ -674,11 +674,6 @@ def scatter_plot_sources_hex(som, sources, raw_df, X, column_name):
     size = new_sizes[np.where(
         new_dimensions == som.get_weights().shape[0])[0][0]]
 
-    if column_name == 'name':
-        colors = ['#008080', '#FF4500', '#FFA500']
-    else:
-        colors = ['#FFA500', '#008080']
-
     hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
     scatter_chart_sample = alt.Chart(scatter_chart_sample_df).mark_circle().encode(
         x=alt.X('w_x:Q', title='', scale=alt.Scale(
@@ -689,8 +684,8 @@ def scatter_plot_sources_hex(som, sources, raw_df, X, column_name):
             domain=[min_y-1, max_y+1])).axis(
             grid=False, tickOpacity=0
         ),
-        color=alt.Color('sources:N', scale=alt.Scale(range=colors  # Replace these with your two desired colors
-                                                     )).legend(orient='bottom')
+        color=alt.Color('sources:N', scale=alt.Scale(
+            scheme='lightmulti')).legend(orient='bottom')
     ).properties(
         height=700,
         width=600,
@@ -1299,7 +1294,7 @@ def get_classification(som_map_id, dataset_toclassify, simbad_dataset, SIMBAD_cl
             class_info = neuron_class_distribution_central[pos]
             dominant_class = class_info['class_proportions'].idxmax()
             dominant_proportion = class_info['class_proportions'].max()
-            if dominant_proportion >= parameters_classification['confidence_threshold']:
+            if dominant_proportion > parameters_classification['confidence_threshold']:
                 # Assign the dominant class
                 assignments_central.append({
                     'id': id_,
