@@ -127,21 +127,35 @@ def get_iterations_index(X, x, y, input_len, sigma, learning_rate, max_iter=1000
 
 def plot_errors(q_error, t_error, iterations, steps=100):
     st.write('## Quantization error and Topographic error')
-    # Plot using st the quantization error and the topographic error togheter
+    # Plot using st the quantization error and the topographic error together
     step_size = iterations // steps
     errors_data = pd.DataFrame(
-        {'Iterations': range(0, iterations+1, step_size), 'Quantization error': q_error, 'Topographic error': t_error})
+        {'Iterations': range(0, iterations + 1, step_size),
+         'Quantization error': q_error,
+         'Topographic error': t_error})
     errors_data_melted = errors_data.melt(
         'Iterations', var_name='Errors', value_name='Value')
 
     c = alt.Chart(errors_data_melted).mark_line().encode(
-        x=alt.X('Iterations', title='Iterations [-]'),
-        y=alt.Y('Value', title='Error [-]'),
-        color='Errors'
+        x=alt.X('Iterations', title='Iterations [-]',
+                axis=alt.Axis(labelFontSize=14, titleFontSize=16)),
+        y=alt.Y(
+            'Value', title='Error [-]', axis=alt.Axis(labelFontSize=14, titleFontSize=16)),
+        color=alt.Color('Errors', legend=alt.Legend(
+            title="Errors", titleFontSize=14, labelFontSize=12))
     ).properties(
         width=600,
         height=400
+    ).configure_legend(
+        orient='top-right',
+        padding=10,
+        cornerRadius=5,
+        fillColor='white',
+        strokeColor='gray',
+        labelFontSize=12,
+        titleFontSize=14
     )
+
     st.altair_chart(c, use_container_width=True)
 
 

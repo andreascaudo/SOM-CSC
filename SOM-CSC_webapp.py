@@ -608,7 +608,7 @@ if st.session_state.SOM_loaded:
                         dataset_toclassify, assignments_central, assignments_neighbor)
 
                     st.session_state.dataset_classified = dataset_classified[['id', 'assigned_class_central',
-                                                                             'confidence_central', 'assigned_class_neighbor', 'confidence_neighbor', 'is_classified']]
+                                                                              'confidence_central', 'assigned_class_neighbor', 'confidence_neighbor', 'is_classified']]
 
                     classification_results = describe_classified_dataset(
                         dataset_classified, assignments_central, assignments_neighbor)
