@@ -10,6 +10,35 @@ import matplotlib.pyplot as plt
 
 
 @st.cache_data
+def download_som_model_bytes(_som, features):
+    # This function returns a bytes object containing the pickled SOM model
+    return pickle.dumps([_som, features])
+
+
+@st.cache_data
+def download_raw_dataset_csv(raw_df):
+    # Return the CSV string for the raw dataset
+    return raw_df.to_csv(index=False)
+
+
+@st.cache_data
+def download_activation_map_csv(_som, X_index):
+    # Compute activation map once and cache the result
+    if _som.topology == 'rectangular':
+        activation_map = plot_activation_response(_som, X_index, plot=False)
+    else:
+        activation_map = plot_activation_response_hex(
+            _som, X_index, plot=False)
+    return dict_to_csv(activation_map)
+
+
+@st.cache_data
+def download_classified_csv(dataset_classified):
+    # Return the CSV string for the classified dataset
+    return dataset_classified.to_csv(index=False)
+
+
+@st.cache_data
 def load_split_csvs(directory):
     all_files = sorted(glob.glob(os.path.join(directory, '*.csv')))
     df_list = [pd.read_csv(file) for file in all_files]
@@ -39,8 +68,10 @@ st.sidebar.header('User input')
 # toogle to select new vs old dataset
 # new dataset
 raw_dataset_path = './data/csc211_mastertable_clean_observationlevel_COMPLETE_xmatchSimbad1arcsec_log_norm_id/'
-if ['raw_df'] not in st.session_state:
+
+if 'raw_df' not in st.session_state:
     st.session_state.raw_df = load_split_csvs(raw_dataset_path)
+
 st.session_state.df = st.session_state.raw_df[['hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
                                                'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm', 'var_newq_b_log_norm']]
 st.session_state.df_index = st.session_state.raw_df[['id', 'hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
@@ -68,17 +99,28 @@ som_model = st.sidebar.file_uploader(
 # button to load the SOM model
 
 if som_model is not None:
-    st.session_state.SOM_loaded = True
     file = pickle.load(som_model)
     st.session_state.som, features = file[0], file[1]
     # get topology
     topology = st.session_state.som.topology
+    dim = st.session_state.som.get_weights().shape[0]
     st.session_state.df = st.session_state.df[features]
     X = st.session_state.df.to_numpy()
 
-    index_features = ['id'].append(features)
+    index_features = ['id'] + features
     st.session_state.df_index = st.session_state.df_index[index_features]
     X_index = st.session_state.df_index.to_numpy()
+
+    if st.sidebar.button('Load SOM'):
+        st.session_state.SOM_loaded = True
+        download_som_model_bytes.clear()
+        download_activation_map_csv.clear()
+        if 'apply_classification' in st.session_state:
+            st.session_state.apply_classification = False
+        if 'apply_download' in st.session_state:
+            st.session_state.apply_download = False
+        st.rerun()
+
 else:
     # Features selection
     st.sidebar.write(
@@ -129,13 +171,19 @@ else:
 
         # PLEASE WAIT
         with st.spinner('Training the SOM...'):
-            if 'som' not in st.session_state:
-                st.session_state.som = train_som(X, dim, dim, len(features), sigma,
-                                                 learning_rate, iterations, topology, seed)
+            st.session_state.som = train_som(X, dim, dim, len(features), sigma,
+                                             learning_rate, iterations, topology, seed)
 
             st.session_state.SOM_loaded = True
             st.session_state.SOM_loaded_trining = True
+
             st.balloons()
+            download_som_model_bytes.clear()
+            download_activation_map_csv.clear()
+            if 'apply_classification' in st.session_state:
+                st.session_state.apply_classification = False
+            if 'apply_download' in st.session_state:
+                st.session_state.apply_download = False
             st.rerun()
 
     elif st.session_state.SOM_loaded and st.session_state.SOM_loaded_trining:
@@ -505,7 +553,7 @@ if st.session_state.SOM_loaded:
     # Add a checkbox for enabling download options
     if st.session_state.som.topology == 'hexagonal':
         enable_classification = st.checkbox("Apply Classification", value=False,
-                                            help="Check this box to apply classification")
+                                            help="Check this box to apply classification", key="apply_classification")
         if enable_classification:
             with st.form(key='classification_form'):
                 with st.expander("See explanation"):
@@ -702,31 +750,35 @@ if st.session_state.SOM_loaded:
                             st.pyplot(fig)
 
     enable_download = st.checkbox("Enable Downloads", value=False,
-                                  help="Check this box to enable download options for the SOM model and datasets.")
+                                  help="Check this box to enable download options for the SOM model and datasets.", key="apply_download")
     if enable_download:
         with st.spinner("Loading download options..."):
             with st.expander("Download Available"):
+                # Download the SOM model
+                model_bytes = download_som_model_bytes(
+                    st.session_state.som, features)
                 st.download_button(
                     label="Download the SOM model",
-                    data=pickle.dumps([st.session_state.som, features]),
+                    data=model_bytes,
                     file_name='SOM_model.pkl',
                     mime='application/octet-stream',
                     help='Download the SOM model, store it, and upload it later'
                 )
+
+                # Download the raw dataset
+                raw_dataset_csv = download_raw_dataset_csv(
+                    st.session_state.raw_df)
                 st.download_button(
                     label="Download the raw dataset",
-                    data=st.session_state.raw_df.to_csv(index=False),
+                    data=raw_dataset_csv,
                     file_name='raw_dataset.csv',
                     mime='text/csv',
                     help='Download the raw dataset'
                 )
-                if st.session_state.som.topology == 'rectangular':
-                    activation_map = plot_activation_response(
-                        st.session_state.som, X_index, plot=False)
-                else:
-                    activation_map = plot_activation_response_hex(
-                        st.session_state.som, X_index, plot=False)
-                activation_map_csv = dict_to_csv(activation_map)
+
+                # Download the activation response
+                activation_map_csv = download_activation_map_csv(
+                    st.session_state.som, X_index)
                 st.download_button(
                     label="Download the activation response map",
                     data=activation_map_csv,
@@ -734,11 +786,14 @@ if st.session_state.SOM_loaded:
                     mime='text/csv',
                     help='Download the activation response'
                 )
+
+                # Download the classification results if available
                 if 'dataset_classified' in st.session_state:
+                    classified_csv = download_classified_csv(
+                        st.session_state.dataset_classified)
                     st.download_button(
                         label="Download the classification results",
-                        data=st.session_state.dataset_classified.to_csv(
-                            index=False),
+                        data=classified_csv,
                         file_name='dataset_classified.csv',
                         mime='text/csv',
                         help='Download the classification results'
