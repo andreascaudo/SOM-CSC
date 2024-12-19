@@ -38,6 +38,17 @@ def download_classified_csv(dataset_classified):
     return dataset_classified.to_csv(index=False)
 
 
+@st.fragment
+def show_download_button(label, data, file_name, mime, help):
+    st.download_button(
+        label=label,
+        data=data,
+        file_name=file_name,
+        mime=mime,
+        help=help
+    )
+
+
 @st.cache_data
 def load_split_csvs(directory):
     all_files = sorted(glob.glob(os.path.join(directory, '*.csv')))
@@ -757,7 +768,7 @@ if st.session_state.SOM_loaded:
                 # Download the SOM model
                 model_bytes = download_som_model_bytes(
                     st.session_state.som, features)
-                st.download_button(
+                show_download_button(
                     label="Download the SOM model",
                     data=model_bytes,
                     file_name='SOM_model.pkl',
@@ -768,7 +779,7 @@ if st.session_state.SOM_loaded:
                 # Download the raw dataset
                 raw_dataset_csv = download_raw_dataset_csv(
                     st.session_state.raw_df)
-                st.download_button(
+                show_download_button(
                     label="Download the raw dataset",
                     data=raw_dataset_csv,
                     file_name='raw_dataset.csv',
@@ -779,7 +790,7 @@ if st.session_state.SOM_loaded:
                 # Download the activation response
                 activation_map_csv = download_activation_map_csv(
                     st.session_state.som, X_index)
-                st.download_button(
+                show_download_button(
                     label="Download the activation response map",
                     data=activation_map_csv,
                     file_name='activation_response.csv',
@@ -791,7 +802,7 @@ if st.session_state.SOM_loaded:
                 if 'dataset_classified' in st.session_state:
                     classified_csv = download_classified_csv(
                         st.session_state.dataset_classified)
-                    st.download_button(
+                    show_download_button(
                         label="Download the classification results",
                         data=classified_csv,
                         file_name='dataset_classified.csv',
