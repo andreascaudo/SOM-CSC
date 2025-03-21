@@ -258,7 +258,7 @@ def topographic_error_hex(som, data):
         return errors / len(data)
 
 
-def plot_rectangular_u_matrix(som, color_type='linear'):
+def plot_rectangular_u_matrix(som, color_type='linear', color_scheme='lightmulti'):
     u_matrix = som.distance_map().T
     u_matrix = pd.DataFrame(
         u_matrix, columns=range(1, len(u_matrix)+1), index=range(1, len(u_matrix)+1))
@@ -273,7 +273,7 @@ def plot_rectangular_u_matrix(som, color_type='linear'):
         y=alt.Y('y:O', sort=alt.EncodingSortField(
             'y', order='descending'), title=''),
         color=alt.Color(
-            'value:Q', scale=alt.Scale(type=color_type, scheme='lightmulti'))
+            'value:Q', scale=alt.Scale(type=color_type, scheme=color_scheme))
     ).properties(
         width=600,
         height=600
@@ -288,7 +288,7 @@ new_dimensions = np.arange(6, 101, 1)
 new_sizes = np.interp(new_dimensions, dimensions, sizes)
 
 
-def plot_u_matrix_hex(som, color_type='linear'):
+def plot_u_matrix_hex(som, color_type='linear', color_scheme='lightmulti'):
     u_matrix = som.distance_map().T
     som_shape = som.get_weights().shape
     u_matrix = pd.DataFrame(
@@ -318,9 +318,9 @@ def plot_u_matrix_hex(som, color_type='linear'):
         y=alt.Y('y:Q', sort=alt.EncodingSortField(
             'y', order='descending'), title='',  scale=alt.Scale(domain=[min_y-1, max_y+1])).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
         color=alt.Color(
-            'value:Q', scale=alt.Scale(scheme='lightmulti')),
+            'value:Q', scale=alt.Scale(scheme=color_scheme)),
         fill=alt.Fill('value:Q', scale=alt.Scale(type=color_type, domain=(
-            min_value, max_value), scheme='lightmulti')).legend(orient='bottom'),
+            min_value, max_value), scheme=color_scheme)).legend(orient='bottom'),
         stroke=alt.value('black'),
         strokeWidth=alt.value(1.0)
     ).transform_calculate(
@@ -347,7 +347,7 @@ def download_activation_response(som, data):
     return a_dict
 
 
-def plot_activation_response(som, X_index, color_type='linear', plot=True):
+def plot_activation_response(som, X_index, color_type='linear', color_scheme='lightmulti', plot=True):
     X = X_index[:, 1:]
     activation_map = som.activation_response(X)
     activation_map = pd.DataFrame(
@@ -367,7 +367,7 @@ def plot_activation_response(som, X_index, color_type='linear', plot=True):
                 'y'), title=''),
             color=alt.Color(
                 'value:Q',
-                scale=alt.Scale(type=color_type, domain=(min_value, max_value), scheme='lightmulti'))
+                scale=alt.Scale(type=color_type, domain=(min_value, max_value), scheme=color_scheme))
         ).properties(
             width=600,
             height=600
@@ -377,7 +377,7 @@ def plot_activation_response(som, X_index, color_type='linear', plot=True):
     return download_activation_response(som, X_index)
 
 
-def plot_activation_response_hex(som, X_index, color_type='linear', plot=True):
+def plot_activation_response_hex(som, X_index, color_type='linear', color_scheme='lightmulti', plot=True):
     X = X_index[:, 1:]
     activation_map = som.activation_response(X)
     activation_map = pd.DataFrame(
@@ -408,9 +408,9 @@ def plot_activation_response_hex(som, X_index, color_type='linear', plot=True):
             y=alt.Y('y:Q', sort=alt.EncodingSortField(
                 'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
             color=alt.Color(
-                'value:Q', scale=alt.Scale(scheme='lightmulti')),
+                'value:Q', scale=alt.Scale(scheme=color_scheme)),
             fill=alt.Fill('value:Q', scale=alt.Scale(type=color_type, domain=(
-                min_value, max_value), scheme='lightmulti')).legend(orient='bottom'),
+                min_value, max_value), scheme=color_scheme)).legend(orient='bottom'),
             stroke=alt.value('black'),
             strokeWidth=alt.value(1.0)
         ).transform_calculate(
@@ -428,7 +428,7 @@ def plot_activation_response_hex(som, X_index, color_type='linear', plot=True):
     return download_activation_response(som, X_index)
 
 
-def feature_space_map_plot(weights, color_type='linear'):
+def feature_space_map_plot(weights, color_type='linear', color_scheme='lightmulti'):
     # plot the mean of the weights across lass dimension
     mean_weights = np.mean(weights, axis=2)
     mean_weights = pd.DataFrame(mean_weights, columns=range(
@@ -447,7 +447,7 @@ def feature_space_map_plot(weights, color_type='linear'):
             'y', order='descending'), title=''),
         color=alt.Color(
             'value:Q',
-            scale=alt.Scale(type=color_type, domain=(min_value, max_value), scheme='lightmulti'))
+            scale=alt.Scale(type=color_type, domain=(min_value, max_value), scheme=color_scheme))
     ).properties(
         width=600,
         height=600
@@ -455,7 +455,7 @@ def feature_space_map_plot(weights, color_type='linear'):
     st.altair_chart(c, use_container_width=True)
 
 
-def feature_space_map_plot_hex(weights, color_type='linear'):
+def feature_space_map_plot_hex(weights, color_type='linear', color_scheme='lightmulti'):
     # plot the mean of the weights across lass dimension
     mean_weights = np.mean(weights, axis=2)
     mean_weights = pd.DataFrame(mean_weights, columns=range(
@@ -484,9 +484,9 @@ def feature_space_map_plot_hex(weights, color_type='linear'):
         y=alt.Y('y:Q', sort=alt.EncodingSortField(
             'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
         color=alt.Color(
-            'value:Q', scale=alt.Scale(scheme='lightmulti')),
+            'value:Q', scale=alt.Scale(scheme=color_scheme)),
         fill=alt.Fill('value:Q', scale=alt.Scale(type=color_type, domain=(
-            min_value, max_value), scheme='lightmulti')).legend(orient='bottom'),
+            min_value, max_value), scheme=color_scheme)).legend(orient='bottom'),
         stroke=alt.value('black'),
         strokeWidth=alt.value(1.0)
     ).transform_calculate(
@@ -979,7 +979,7 @@ def category_plot_clustering(map):
     st.altair_chart(scatter_chart_sample, use_container_width=True)
 
 
-def features_plot_hex(_map, color_type, scaling=sum, flip=True):
+def features_plot_hex(_map, color_type, color_scheme, scaling=sum, flip=True):
     if flip:
         _map = list(map(list, zip(*_map)))
     '''
@@ -1067,9 +1067,9 @@ def features_plot_hex(_map, color_type, scaling=sum, flip=True):
             'y', order='descending'), title='', scale=alt.Scale(
                 domain=[min_y-1, max_y+1])).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
         color=alt.Color(
-            'value:Q', scale=alt.Scale(scheme='lightmulti', type='pow')),
+            'value:Q', scale=alt.Scale(scheme=color_scheme, type='pow')),
         fill=alt.Fill('value:Q', scale=alt.Scale(type=color_type, domain=(
-            min_value, max_value), scheme='lightmulti')).legend(orient='bottom'),
+            min_value, max_value), scheme=color_scheme)).legend(orient='bottom'),
         stroke=alt.value('black'),
         strokeWidth=alt.value(1.0)
     ).transform_calculate(
@@ -1093,7 +1093,7 @@ def features_plot_hex(_map, color_type, scaling=sum, flip=True):
     st.altair_chart(c, use_container_width=True)
 
 
-def features_plot(_map, color_type, scaling=sum, flip=True):
+def features_plot(_map, color_type, color_scheme, scaling=sum, flip=True):
     if flip:
         _map = list(map(list, zip(*_map)))
     '''
@@ -1161,7 +1161,7 @@ def features_plot(_map, color_type, scaling=sum, flip=True):
         y=alt.Y('y:O', sort=alt.EncodingSortField(
             'y', order='descending'), title=''),
         color=alt.Color(
-            'value:Q', scale=alt.Scale(type=color_type, scheme='lightmulti'))
+            'value:Q', scale=alt.Scale(type=color_type, scheme=color_scheme))
     ).properties(
         height=750
     )

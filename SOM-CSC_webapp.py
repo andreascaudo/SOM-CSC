@@ -103,6 +103,8 @@ main_type = st.session_state.raw_df[simbad_type]
 #                     'LMXB', 'XB', 'YSO', 'TTau*', 'Orion_V*']
 
 default_main_type = ['YSO', 'XrayBin', 'Seyfert', 'AGN']
+color_schemes = ['lightmulti', 'blueorange',
+                 'viridis', 'redyellowblue', 'plasma', 'greenblue', 'redblue']
 
 # Let the user load a SOM model
 som_model = st.sidebar.file_uploader(
@@ -228,6 +230,8 @@ if st.session_state.SOM_loaded:
 
         if plot_submit:
             if plot_type in ['U-Matrix', 'Activation Response', 'Training Feature Space Map', 'Feature Visualization']:
+                color_scheme = st.selectbox(
+                    'Color scheme', color_schemes, 0)
                 log_option = st.checkbox(
                     'Logarithmic scale', value=False, help='Use a logarithmic scale for the color map')
                 type_option = 'log' if log_option else 'linear'
@@ -239,9 +243,10 @@ if st.session_state.SOM_loaded:
                         'The U-Matrix is a visualization tool that represents the distance between neurons in the SOM. It is a 2D grid where each cell is colored based on the distance between the neurons. The U-Matrix is a useful tool to visualize the topology of the SOM and identify clusters of neurons.')
                 if st.session_state.som.topology == 'rectangular':
                     plot_rectangular_u_matrix(
-                        st.session_state.som, type_option)
+                        st.session_state.som, type_option, color_scheme)
                 else:
-                    plot_u_matrix_hex(st.session_state.som, type_option)
+                    plot_u_matrix_hex(st.session_state.som,
+                                      type_option, color_scheme)
             elif plot_type == 'Activation Response':
                 # Activation Response
                 st.write('## Activation Response')
@@ -250,10 +255,10 @@ if st.session_state.SOM_loaded:
                         'The Activation Response visualization tool enables the user to visualize the frequency of samples that are assigned to each neuron. The color of each neuron will indicate the number of times that neuron was identified as the best matching unit for a sample.')
                 if st.session_state.som.topology == 'rectangular':
                     activation_map = plot_activation_response(
-                        st.session_state.som, X_index, type_option)
+                        st.session_state.som, X_index, type_option, color_scheme)
                 else:
                     activation_map = plot_activation_response_hex(
-                        st.session_state.som, X_index, type_option)
+                        st.session_state.som, X_index, type_option, color_scheme)
                 activation_map_flag = True
             elif plot_type == 'Training Feature Space Map':
                 # Training Feature Space Map
@@ -280,9 +285,11 @@ if st.session_state.SOM_loaded:
                     :, :, features_index]
                 if len(features_index) > 0:
                     if st.session_state.som.topology == 'rectangular':
-                        feature_space_map_plot(weights, type_option)
+                        feature_space_map_plot(
+                            weights, type_option, color_scheme)
                     else:
-                        feature_space_map_plot_hex(weights, type_option)
+                        feature_space_map_plot_hex(
+                            weights, type_option, color_scheme)
 
             elif plot_type == 'Source Name Visualization':
                 if st.session_state.som.topology == 'rectangular':
@@ -490,13 +497,14 @@ if st.session_state.SOM_loaded:
                         if is_string_var:
                             category_plot_sources(var)
                         else:
-                            features_plot(var, type_option, scaling=scaling)
+                            features_plot(var, type_option,
+                                          color_scheme, scaling=scaling)
                     else:
                         if is_string_var:
                             category_plot_sources_hex(var)
                         else:
                             features_plot_hex(
-                                var, type_option, scaling=scaling)
+                                var, type_option, color_scheme, scaling=scaling)
                 elif dataset_choice == 'Upload a new dataset':
                     with st.expander("See explanation"):
                         st.write('This visualization tool enables coloring of the pre-trained SOM based on data from a newly uploaded dataset, allowing users to dynamically select which feature to use for coloring. Users have the flexibility to upload a new dataset and choose a specific feature that will be applied to color the previously trained SOM.')
@@ -547,14 +555,14 @@ if st.session_state.SOM_loaded:
                                         category_plot_sources(var)
                                     else:
                                         features_plot(
-                                            var, type_option, scaling=scaling)
+                                            var, type_option, color_scheme, scaling=scaling)
                                 else:
                                     if is_string_var:
                                         category_plot_sources_hex(
                                             var)
                                     else:
                                         features_plot_hex(
-                                            var, type_option, scaling=scaling)
+                                            var, type_option, color_scheme, scaling=scaling)
                             else:
                                 st.error(
                                     "Dataset validation failed. Please check the column names and ensure there are no empty values.")
