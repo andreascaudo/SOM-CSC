@@ -359,8 +359,9 @@ if st.session_state.SOM_loaded:
 
                 name_counts = st.session_state.raw_df['name'].value_counts()
                 max_counts = int(name_counts.iloc[0])
-                min_detections = st.slider(
-                    'Minimum Detections', 2, max_counts, 10, help='')
+                min_counts = int(name_counts.iloc[-1])
+                min_max_detections = st.slider(
+                    'Minimum Detections', np.max((2, min_counts)), max_counts, (int(max_counts/4)-1, int(max_counts/3)-1), help='')
                 id_to_pos = {}  # Dictionary to store the mapping from IDs to positions
                 for id_ in st.session_state.raw_df['id']:
                     position = st.session_state.som.winner(X[id_])
@@ -370,9 +371,9 @@ if st.session_state.SOM_loaded:
                     'name')['id'].apply(list).to_dict()
 
                 dispersion_list = get_dispersion(
-                    name_ids, id_to_pos, min_detections)
+                    name_ids, id_to_pos, min_max_detections)
                 dispersion_values = [dispersion for _,
-                                     dispersion in dispersion_list]
+                                     dispersion, _ in dispersion_list]
 
                 # Plot the histogram of all normalized dispersion values
                 fig, ax = plt.subplots(figsize=(10, 6))
@@ -389,9 +390,9 @@ if st.session_state.SOM_loaded:
 
                 dispersion_list.sort(key=lambda x: x[1], reverse=True)
                 dispersion_ms = [
-                    f"{name[0]} [{name[1]}]" for name in dispersion_list]
+                    f"{name[0]} [{name[1]}] [{name[2]}]" for name in dispersion_list]
                 sources = st.multiselect(
-                    'Select sources name [Dispersion index]', dispersion_ms)
+                    'Select sources name [Dispersion index] [N. of detections]', dispersion_ms)
                 visualization_type = st.radio(
                     'Visualization type', ['Scatter', vis_type_string])
                 st.write(

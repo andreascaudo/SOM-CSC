@@ -159,13 +159,13 @@ def plot_errors(q_error, t_error, iterations, steps=100):
     st.altair_chart(c, use_container_width=True)
 
 
-def get_dispersion(name_ids, id_to_pos, min_detections):
+def get_dispersion(name_ids, id_to_pos, min_max_detections):
     dispersion_list = []
     for source_name, source_ids in name_ids.items():
         # Retrieve positions of the source's detections
         positions = [id_to_pos[id_] for id_ in source_ids if id_ in id_to_pos]
 
-        if len(positions) < min_detections:
+        if len(positions) < min_max_detections[0] or len(positions) > min_max_detections[1]:
             continue  # Skip if not enough valid detections
 
         # If there are fewer than 2 positions, dispersion is zero
@@ -181,7 +181,7 @@ def get_dispersion(name_ids, id_to_pos, min_detections):
                 sum(pairwise_distances) / len(pairwise_distances), 2)
 
         # Collect the dispersion metrics
-        dispersion_list.append((source_name, dispersion))
+        dispersion_list.append((source_name, dispersion, len(positions)))
 
     return dispersion_list
 
