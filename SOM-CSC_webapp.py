@@ -8,6 +8,42 @@ import glob
 import os
 import matplotlib.pyplot as plt
 
+st.set_page_config(
+    page_title="SOM CSC",
+    initial_sidebar_state="collapsed"
+)
+
+
+# Add this function to generate default colors
+def get_default_color(index, color_scheme='lightmulti'):
+    """
+    Returns a color from a predefined set of colors based on the index.
+    Uses a variety of colors to ensure distinctiveness.
+    """
+    # Common colors from various schemes
+    color_schemes = {
+        'lightmulti': [
+            '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+            '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+            '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5'
+        ],
+        'category10': [
+            '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+            '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
+        ],
+        'set3': [
+            '#8dd3c7', '#ffffb3', '#bebada', '#fb8072', '#80b1d3',
+            '#fdb462', '#b3de69', '#fccde5', '#d9d9d9', '#bc80bd',
+            '#ccebc5', '#ffed6f'
+        ]
+    }
+
+    # Use the specified color scheme or default to lightmulti
+    colors = color_schemes.get(color_scheme, color_schemes['lightmulti'])
+
+    # Return a color based on the index, cycling through the colors if needed
+    return colors[index % len(colors)]
+
 
 @st.cache_data
 def download_som_model_bytes(_som, features):
@@ -63,33 +99,38 @@ st.write("""
 # Exploring the Chandra Source Catalog (CSC) using Self-Organizing Maps (SOM)
 """)
 
-if 'SOM_loaded' not in st.session_state:
-    st.session_state.SOM_loaded = False
-    st.session_state.SOM_loaded_trining = False
-    # write in red SOM STATUS: NOT LOADED
-    st.write('#### SOM STATUS: :red[NOT LOADED]')
-elif st.session_state.SOM_loaded:
-    st.write('#### SOM STATUS: :green[LOADED]')
-elif st.session_state.SOM_loaded == False:
-    st.write('#### SOM STATUS: :red[NOT LOADED]')
+# Initialize color customization state if not already present
+if 'custom_colors' not in st.session_state:
+    st.session_state.custom_colors = {}
 
-# sidebar for the dataset
-st.sidebar.header('User input')
+# Add an initialized colors state to track which colors have been assigned
+if 'initialized_colors' not in st.session_state:
+    st.session_state.initialized_colors = set()
 
-# toogle to select new vs old dataset
-# new dataset
+# Load data first
 raw_dataset_path = './data/csc211_mastertable_clean_observationlevel_COMPLETE_xmatchSimbad1arcsec_log_norm_id/'
 
 if 'raw_df' not in st.session_state:
     st.session_state.raw_df = load_split_csvs(raw_dataset_path)
 
-st.session_state.df = st.session_state.raw_df[['hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
-                                               'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm', 'var_newq_b_log_norm']]
-st.session_state.df_index = st.session_state.raw_df[['id', 'hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
-                                                     'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm', 'var_newq_b_log_norm']]
+if 'df' not in st.session_state:
+    st.session_state.df = st.session_state.raw_df[['hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
+                                                   'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm', 'var_newq_b_log_norm']]
 
-st.session_state.df_to_norm = st.session_state.raw_df[[
-    'powlaw_gamma_to_log_norm', 'bb_kt_to_log_norm', 'var_ratio_b_to_log_norm', 'var_ratio_h_to_log_norm', 'var_ratio_s_to_log_norm']]
+if 'df_index' not in st.session_state:
+    st.session_state.df_index = st.session_state.raw_df[['id', 'hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
+                                                         'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm', 'var_newq_b_log_norm']]
+
+if 'df_to_norm' not in st.session_state:
+    st.session_state.df_to_norm = st.session_state.raw_df[[
+        'powlaw_gamma_to_log_norm', 'bb_kt_to_log_norm', 'var_ratio_b_to_log_norm', 'var_ratio_h_to_log_norm', 'var_ratio_s_to_log_norm']]
+
+# Store all original features before any model is loaded
+if 'all_original_features' not in st.session_state:
+    # Store the original columns without the '_log_norm' suffix
+    original_columns = st.session_state.df.columns.str.replace('_log_norm', '')
+    st.session_state.all_original_features = list(original_columns)
+
 # remove log_norm from the columns name
 st.session_state.df.columns = st.session_state.df.columns.str.replace(
     '_log_norm', '')
@@ -105,6 +146,47 @@ main_type = st.session_state.raw_df[simbad_type]
 default_main_type = ['YSO', 'XrayBin', 'Seyfert', 'AGN']
 color_schemes = ['lightmulti', 'blueorange',
                  'viridis', 'redyellowblue', 'plasma', 'greenblue', 'redblue']
+
+# Now try to load the default model after data is prepared
+if 'SOM_loaded' not in st.session_state:
+    st.session_state.SOM_loaded = False
+    st.session_state.SOM_loaded_trining = False
+    # Auto-load the default model
+    try:
+        default_model_path = './models/SOM_model_default.pkl'
+        with open(default_model_path, 'rb') as f:
+            file = pickle.load(f)
+            st.session_state.som, features = file[0], file[1]
+            st.session_state.df = st.session_state.df[features]
+            X = st.session_state.df.to_numpy()
+
+            index_features = ['id'] + features
+            st.session_state.df_index = st.session_state.df_index[index_features]
+            X_index = st.session_state.df_index.to_numpy()
+
+            st.session_state.SOM_loaded = True
+            st.success("Default SOM model loaded successfully!")
+    except Exception as e:
+        # write in red SOM STATUS: NOT LOADED
+        st.write('#### SOM STATUS: :red[NOT LOADED]')
+        st.error(f"Could not load default model: {e}")
+elif st.session_state.SOM_loaded:
+    st.write('#### SOM STATUS: :green[LOADED]')
+elif st.session_state.SOM_loaded == False:
+    st.write('#### SOM STATUS: :red[NOT LOADED]')
+
+# Remove the sidebar toggle functionality and add instructions
+st.write("""
+To train a new SOM, click the **>** arrow icon in the top-left corner to expand the sidebar.
+""")
+
+
+# sidebar for the dataset
+st.sidebar.header('User input')
+
+# toogle to select new vs old dataset
+# new dataset
+raw_dataset_path = './data/csc211_mastertable_clean_observationlevel_COMPLETE_xmatchSimbad1arcsec_log_norm_id/'
 
 # Let the user load a SOM model
 som_model = st.sidebar.file_uploader(
@@ -138,18 +220,32 @@ else:
     # Features selection
     st.sidebar.write(
         '..or select the features and parameters for training the SOM')
-    features = list(st.session_state.df.columns)
-    default_features = list(
-        st.session_state.df.columns.drop('var_newq_b'))
+
+    # Use the full list of original features for selection
+    features_for_selection = st.session_state.all_original_features
+
+    # Fix the default features selection to avoid KeyError
+    if 'var_newq_b' in features_for_selection:
+        default_features = [
+            f for f in features_for_selection if f != 'var_newq_b']
+    else:
+        default_features = features_for_selection.copy()
+
     features = st.sidebar.multiselect(
-        'Features', features, default_features, help='Select the features to be used for training the SOM.')
+        'Features', features_for_selection, default_features, help='Select the features to be used for training the SOM.')
     index_features = ['id'] + features
 
-    st.session_state.df = st.session_state.df[features]
-    X = st.session_state.df.to_numpy()
+    # Only update df and X if we're not already using a loaded model
+    if not st.session_state.SOM_loaded:
+        st.session_state.df = st.session_state.df[features]
+        X = st.session_state.df.to_numpy()
 
-    st.session_state.df_index = st.session_state.df_index[index_features]
-    X_index = st.session_state.df_index.to_numpy()
+        st.session_state.df_index = st.session_state.df_index[index_features]
+        X_index = st.session_state.df_index.to_numpy()
+    else:
+        # Get the current features and data for the loaded model
+        X = st.session_state.df.to_numpy()
+        X_index = st.session_state.df_index.to_numpy()
 
     # SOM parameters7
     st.sidebar.write('Select the SOM hyperparameters')
@@ -173,31 +269,71 @@ else:
 
     # Generate a new SOM model button
     if st.sidebar.button('Generate SOM'):
-        if not skip_errors:
-            errors_bar = st.progress(
-                0, text="Getting quantization and topographic errors")
+        # When training a new model, reconstruct the dataframes with the selected features
+        # This ensures we're working with the fresh original data, not filtered by previous models
 
-            st.session_state.steps = 100
-            st.session_state.som, st.session_state.q_error, st.session_state.t_error = get_iterations_index(X, dim, dim, len(features), sigma,
-                                                                                                            learning_rate, iterations, topology, seed, st.session_state.steps, errors_bar=errors_bar)
-            errors_bar.empty()
+        # Fix the column selection to get exactly the features we need
+        # First for each feature, find the corresponding column in raw_df (with or without _log_norm suffix)
+        raw_df_columns = []
+        for feature in features:
+            # Try to find the exact column or with _log_norm suffix
+            if feature in st.session_state.raw_df.columns:
+                raw_df_columns.append(feature)
+            elif feature + '_log_norm' in st.session_state.raw_df.columns:
+                raw_df_columns.append(feature + '_log_norm')
 
-        # PLEASE WAIT
-        with st.spinner('Training the SOM...'):
-            st.session_state.som = train_som(X, dim, dim, len(features), sigma,
-                                             learning_rate, iterations, topology, seed)
+        # Add the ID column if it exists
+        if 'id' in st.session_state.raw_df.columns:
+            raw_df_columns = ['id'] + raw_df_columns
 
-            st.session_state.SOM_loaded = True
-            st.session_state.SOM_loaded_trining = True
+        # Create fresh dataframes with the selected features
+        df_selected = st.session_state.raw_df[raw_df_columns].copy()
+        df_selected.columns = df_selected.columns.str.replace('_log_norm', '')
 
-            st.balloons()
-            download_som_model_bytes.clear()
-            download_activation_map_csv.clear()
-            if 'apply_classification' in st.session_state:
-                st.session_state.apply_classification = False
-            if 'apply_download' in st.session_state:
-                st.session_state.apply_download = False
-            st.rerun()
+        # Create the training data array, excluding the ID column
+        X = df_selected.drop('id', axis=1, errors='ignore').to_numpy()
+
+        # Create the index data with IDs
+        X_index = df_selected.to_numpy() if 'id' in df_selected.columns else X
+
+        # Verify that the number of features matches what's expected
+        if X.shape[1] != len(features):
+            st.error(
+                f"Feature count mismatch: Selected {len(features)} features but data has {X.shape[1]} columns.")
+            st.error(f"Selected features: {features}")
+            st.error(
+                f"Data columns: {df_selected.drop('id', axis=1, errors='ignore').columns.tolist()}")
+        else:
+            if not skip_errors:
+                errors_bar = st.progress(
+                    0, text="Getting quantization and topographic errors")
+
+                st.session_state.steps = 100
+                st.session_state.som, st.session_state.q_error, st.session_state.t_error = get_iterations_index(X, dim, dim, len(features), sigma,
+                                                                                                                learning_rate, iterations, topology, seed, st.session_state.steps, errors_bar=errors_bar)
+                errors_bar.empty()
+
+            # PLEASE WAIT
+            with st.spinner('Training the SOM...'):
+                st.session_state.som = train_som(X, dim, dim, len(features), sigma,
+                                                 learning_rate, iterations, topology, seed)
+
+                st.session_state.SOM_loaded = True
+                st.session_state.SOM_loaded_trining = True
+
+                # Update session state with the new dataframes
+                st.session_state.df = df_selected.drop(
+                    'id', axis=1, errors='ignore')
+                st.session_state.df_index = df_selected
+
+                st.balloons()
+                download_som_model_bytes.clear()
+                download_activation_map_csv.clear()
+                if 'apply_classification' in st.session_state:
+                    st.session_state.apply_classification = False
+                if 'apply_download' in st.session_state:
+                    st.session_state.apply_download = False
+                st.rerun()
 
     elif st.session_state.SOM_loaded and st.session_state.SOM_loaded_trining:
         if not skip_errors:
@@ -219,6 +355,11 @@ else:
             f"**Topographic Error:** {topographic_error:.4f}")
 
 if st.session_state.SOM_loaded:
+    # When a model is loaded (either default, uploaded, or generated), ensure we have proper X and X_index
+    if not 'X' in locals() or not 'X_index' in locals():
+        X = st.session_state.df.to_numpy()
+        X_index = st.session_state.df_index.to_numpy()
+
     activation_map_flag = False
     with st.form(key='plot_form'):
         st.write('## Select the plot to be displayed')
@@ -316,26 +457,60 @@ if st.session_state.SOM_loaded:
                     'Select sources name [number of detections]', sorted_names)
                 visualization_type = st.radio(
                     'Visualization type', ['Scatter', vis_type_string])
+
+                # Add color customization option
+                customize_colors = st.checkbox(
+                    'Customize colors for sources', key='customize_colors_source_name')
+
+                if customize_colors and len(sources) > 0:
+                    with st.expander("Color Customization"):
+                        st.write("Select custom colors for each source:")
+                        clean_sources = [source.split(
+                            ' [')[0] for source in sources]
+
+                        # Create columns to save space
+                        cols = st.columns(min(3, len(clean_sources)))
+
+                        for i, source in enumerate(clean_sources):
+                            col_idx = i % len(cols)
+                            with cols[col_idx]:
+                                # Use existing color if already set or a varied default color
+                                if source not in st.session_state.initialized_colors:
+                                    # Assign a default color from our variety of colors
+                                    st.session_state.custom_colors[source] = get_default_color(
+                                        i)
+                                    st.session_state.initialized_colors.add(
+                                        source)
+
+                                selected_color = st.color_picker(
+                                    f"{source}", st.session_state.custom_colors[source], key=f"color_{source}")
+                                st.session_state.custom_colors[source] = selected_color
+
                 st.write(
                     "###### To update the map with the name of the selected sources, please click the 'Show Plot' button again.")
                 if len(sources) > 0:
                     sources = [source.split(' [')[0] for source in sources]
+                    source_colors = {src: st.session_state.custom_colors.get(
+                        src, None) for src in sources} if customize_colors else None
+
                     if st.session_state.som.topology == 'rectangular':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources(
-                                st.session_state.som, sources, st.session_state.raw_df, X, 'name')
+                                st.session_state.som, sources, st.session_state.raw_df, X, 'name', custom_colors=source_colors)
                         elif visualization_type == 'Rectangular':
                             category_map = project_feature(
                                 st.session_state.som, X, st.session_state.raw_df['name'], sources)
-                            category_plot_sources(category_map)
+                            category_plot_sources(
+                                category_map, custom_colors=source_colors)
                     elif st.session_state.som.topology == 'hexagonal':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources_hex(
-                                st.session_state.som, sources, st.session_state.raw_df, X, 'name')
+                                st.session_state.som, sources, st.session_state.raw_df, X, 'name', custom_colors=source_colors)
                         elif visualization_type == 'Hexbin':
                             category_map = project_feature(
                                 st.session_state.som, X, st.session_state.raw_df['name'], sources)
-                            category_plot_sources_hex(category_map)
+                            category_plot_sources_hex(
+                                category_map, custom_colors=source_colors)
             elif plot_type == 'Source Dispersion Visualization':
                 if st.session_state.som.topology == 'rectangular':
                     vis_type_string = 'Rectangular'
@@ -395,26 +570,60 @@ if st.session_state.SOM_loaded:
                     'Select sources name [Dispersion index] [N. of detections]', dispersion_ms)
                 visualization_type = st.radio(
                     'Visualization type', ['Scatter', vis_type_string])
+
+                # Add color customization option
+                customize_colors = st.checkbox(
+                    'Customize colors for sources', key='customize_colors_source_dispersion')
+
+                if customize_colors and len(sources) > 0:
+                    with st.expander("Color Customization"):
+                        st.write("Select custom colors for each source:")
+                        clean_sources = [source.split(
+                            ' [')[0] for source in sources]
+
+                        # Create columns to save space
+                        cols = st.columns(min(3, len(clean_sources)))
+
+                        for i, source in enumerate(clean_sources):
+                            col_idx = i % len(cols)
+                            with cols[col_idx]:
+                                # Use existing color if already set or a varied default color
+                                if source not in st.session_state.initialized_colors:
+                                    # Assign a default color from our variety of colors
+                                    st.session_state.custom_colors[source] = get_default_color(
+                                        i)
+                                    st.session_state.initialized_colors.add(
+                                        source)
+
+                                selected_color = st.color_picker(
+                                    f"{source}", st.session_state.custom_colors[source], key=f"color_disp_{source}")
+                                st.session_state.custom_colors[source] = selected_color
+
                 st.write(
                     "###### To update the map with the name of the selected sources, please click the 'Show Plot' button again.")
                 if len(sources) > 0:
                     sources = [source.split(' [')[0] for source in sources]
+                    source_colors = {src: st.session_state.custom_colors.get(
+                        src, None) for src in sources} if customize_colors else None
+
                     if st.session_state.som.topology == 'rectangular':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources(
-                                st.session_state.som, sources, st.session_state.raw_df, X, 'name')
+                                st.session_state.som, sources, st.session_state.raw_df, X, 'name', custom_colors=source_colors)
                         elif visualization_type == 'Rectangular':
                             category_map = project_feature(
                                 st.session_state.som, X, st.session_state.raw_df['name'], sources)
-                            category_plot_sources(category_map)
+                            category_plot_sources(
+                                category_map, custom_colors=source_colors)
                     elif st.session_state.som.topology == 'hexagonal':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources_hex(
-                                st.session_state.som, sources, st.session_state.raw_df, X, 'name')
+                                st.session_state.som, sources, st.session_state.raw_df, X, 'name', custom_colors=source_colors)
                         elif visualization_type == 'Hexbin':
                             category_map = project_feature(
                                 st.session_state.som, X, st.session_state.raw_df['name'], sources)
-                            category_plot_sources_hex(category_map)
+                            category_plot_sources_hex(
+                                category_map, custom_colors=source_colors)
 
             elif plot_type == 'Main Type Visualization':
                 if st.session_state.som.topology == 'rectangular':
@@ -449,26 +658,57 @@ if st.session_state.SOM_loaded:
                 visualization_type = st.radio(
                     'Visualization type', ['Scatter', vis_type_string])
 
+                # Add color customization option
+                customize_colors = st.checkbox(
+                    'Customize colors for main types', key='customize_colors_main_type')
+
+                if customize_colors and len(main_type_) > 0:
+                    with st.expander("Color Customization"):
+                        st.write("Select custom colors for each main type:")
+
+                        # Create columns to save space
+                        cols = st.columns(min(3, len(main_type_)))
+
+                        for i, type_name in enumerate(main_type_):
+                            col_idx = i % len(cols)
+                            with cols[col_idx]:
+                                # Use existing color if already set or a varied default color
+                                if type_name not in st.session_state.initialized_colors:
+                                    # Assign a default color from our variety of colors
+                                    st.session_state.custom_colors[type_name] = get_default_color(
+                                        i)
+                                    st.session_state.initialized_colors.add(
+                                        type_name)
+
+                                selected_color = st.color_picker(
+                                    f"{type_name}", st.session_state.custom_colors[type_name], key=f"color_main_{type_name}")
+                                st.session_state.custom_colors[type_name] = selected_color
+
                 st.write(
                     "###### To update the map with the name of the selected sources, please click the 'Show Plot' button again.")
 
                 if len(main_type_) > 0:
+                    type_colors = {mt: st.session_state.custom_colors.get(
+                        mt, None) for mt in main_type_} if customize_colors else None
+
                     if st.session_state.som.topology == 'rectangular':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources(
-                                st.session_state.som, main_type_, st.session_state.raw_df, X, simbad_type)
+                                st.session_state.som, main_type_, st.session_state.raw_df, X, simbad_type, custom_colors=type_colors)
                         elif visualization_type == 'Rectangular':
                             category_map = project_feature(
                                 st.session_state.som, X, st.session_state.raw_df[simbad_type], main_type_)
-                            category_plot_sources(category_map)
+                            category_plot_sources(
+                                category_map, custom_colors=type_colors)
                     elif st.session_state.som.topology == 'hexagonal':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources_hex(
-                                st.session_state.som, main_type_, st.session_state.raw_df, X, simbad_type)
+                                st.session_state.som, main_type_, st.session_state.raw_df, X, simbad_type, custom_colors=type_colors)
                         elif visualization_type == 'Hexbin':
                             category_map = project_feature(
                                 st.session_state.som, X, st.session_state.raw_df[simbad_type], main_type_)
-                            category_plot_sources_hex(category_map)
+                            category_plot_sources_hex(
+                                category_map, custom_colors=type_colors)
             elif plot_type == 'Feature Visualization':
                 dataset_choice = st.radio(
                     'Choose the dataset', ['Use the main dataset', 'Upload a new dataset'])

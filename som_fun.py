@@ -499,6 +499,7 @@ def feature_space_map_plot_hex(weights, color_type='linear', color_scheme='light
     ).configure_view(
         strokeWidth=0
     )
+    st.write('## SOM feature plot')
     st.altair_chart(c, use_container_width=True)
 
 
@@ -607,7 +608,7 @@ def scatter_plot_clustering(som, X, GMM_cluster_labels):
     st.altair_chart(scatter_chart_sample, use_container_width=True)
 
 
-def scatter_plot_sources(som, sources, raw_df, X, column_name):
+def scatter_plot_sources(som, sources, raw_df, X, column_name, custom_colors=None):
     # get the index where the sources are in the raw_df and get rows from X
     idx = raw_df.index[raw_df[column_name].isin(sources)]
     X_sources_name = raw_df[column_name][idx]
@@ -634,6 +635,20 @@ def scatter_plot_sources(som, sources, raw_df, X, column_name):
     min_y = 0
     max_y = dimension
 
+    # Prepare color scale based on custom colors if provided
+    if custom_colors:
+        # Create a custom color scale using the user-provided colors
+        domain = list(custom_colors.keys())
+        range_ = list(custom_colors.values())
+
+        color_scale = alt.Scale(
+            domain=domain,
+            range=range_
+        )
+    else:
+        # Use default color scheme
+        color_scale = alt.Scale(scheme='lightmulti')
+
     scatter_chart_sample = alt.Chart(scatter_chart_sample_df).mark_circle().encode(
         x=alt.X('w_x', title='', scale=alt.Scale(
             domain=[min_x-1, max_x+1])).axis(
@@ -641,8 +656,7 @@ def scatter_plot_sources(som, sources, raw_df, X, column_name):
         y=alt.Y('w_y', title='', scale=alt.Scale(
             domain=[min_y-1, max_y+1])).axis(
             grid=False),
-        color=alt.Color('sources:N', scale=alt.Scale(
-            scheme='lightmulti')).legend(orient='bottom')
+        color=alt.Color('sources:N', scale=color_scale).legend(orient='bottom')
     ).properties(
         height=700,
         width=600
@@ -652,7 +666,7 @@ def scatter_plot_sources(som, sources, raw_df, X, column_name):
     st.altair_chart(scatter_chart_sample, use_container_width=True)
 
 
-def scatter_plot_sources_hex(som, sources, raw_df, X, column_name):
+def scatter_plot_sources_hex(som, sources, raw_df, X, column_name, custom_colors=None):
     # get the index where the sources are in the raw_df and get rows from X
     idx = raw_df.index[raw_df[column_name].isin(sources)]
     X_sources_name = raw_df[column_name][idx]
@@ -688,6 +702,20 @@ def scatter_plot_sources_hex(som, sources, raw_df, X, column_name):
     size = new_sizes[np.where(
         new_dimensions == som.get_weights().shape[0])[0][0]]
 
+    # Prepare color scale based on custom colors if provided
+    if custom_colors:
+        # Create a custom color scale using the user-provided colors
+        domain = list(custom_colors.keys())
+        range_ = list(custom_colors.values())
+
+        color_scale = alt.Scale(
+            domain=domain,
+            range=range_
+        )
+    else:
+        # Use default color scheme
+        color_scale = alt.Scale(scheme='lightmulti')
+
     hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
     scatter_chart_sample = alt.Chart(scatter_chart_sample_df).mark_circle().encode(
         x=alt.X('w_x:Q', title='', scale=alt.Scale(
@@ -698,8 +726,7 @@ def scatter_plot_sources_hex(som, sources, raw_df, X, column_name):
             domain=[min_y-1, max_y+1])).axis(
             grid=False, tickOpacity=0
         ),
-        color=alt.Color('sources:N', scale=alt.Scale(
-            scheme='lightmulti')).legend(orient='bottom')
+        color=alt.Color('sources:N', scale=color_scale).legend(orient='bottom')
     ).properties(
         height=700,
         width=600,
@@ -732,7 +759,7 @@ def project_feature(som, X, feature, source=None):
     return map
 
 
-def category_plot_sources(_map, flip=True):
+def category_plot_sources(_map, flip=True, custom_colors=None):
 
     if flip:
         _map = list(map(list, zip(*_map)))
@@ -764,12 +791,26 @@ def category_plot_sources(_map, flip=True):
     # remove row with cluster None
     pd_winning_categories = pd_winning_categories.dropna()
 
+    # Prepare color scale based on custom colors if provided
+    if custom_colors:
+        # Create a custom color scale using the user-provided colors
+        domain = list(custom_colors.keys())
+        range_ = list(custom_colors.values())
+
+        color_scale = alt.Scale(
+            domain=domain,
+            range=range_
+        )
+    else:
+        # Use default color scheme
+        color_scale = alt.Scale(scheme='lightmulti')
+
     scatter_chart_sample = alt.Chart(pd_winning_categories).mark_rect().encode(
         x=alt.X('w_x:O', title='', scale=alt.Scale(domain=tick_x)),
         y=alt.Y('w_y:O', sort=alt.EncodingSortField(
             'w_y', order='descending'), title='', scale=alt.Scale(domain=tick_y)),
         color=alt.Color(
-            'source:N', scale=alt.Scale(scheme='lightmulti'), legend=alt.Legend(orient='bottom'))
+            'source:N', scale=color_scale, legend=alt.Legend(orient='bottom'))
     ).properties(
         height=700,
         width=600
@@ -778,7 +819,7 @@ def category_plot_sources(_map, flip=True):
     st.altair_chart(scatter_chart_sample, use_container_width=True)
 
 
-def category_plot_sources_hex(_map, flip=True):
+def category_plot_sources_hex(_map, flip=True, custom_colors=None):
     if flip:
         _map = list(map(list, zip(*_map)))
     '''
@@ -819,6 +860,20 @@ def category_plot_sources_hex(_map, flip=True):
     index = np.where(new_dimensions == len(_map))[0][0]
     size = new_sizes[index]
 
+    # Prepare color scale based on custom colors if provided
+    if custom_colors:
+        # Create a custom color scale using the user-provided colors
+        domain = list(custom_colors.keys())
+        range_ = list(custom_colors.values())
+
+        color_scale = alt.Scale(
+            domain=domain,
+            range=range_
+        )
+    else:
+        # Use default color scheme
+        color_scale = alt.Scale(scheme='lightmulti')
+
     hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
     c = alt.Chart(pd_winning_categories).mark_point(shape=hexagon, size=size**2).encode(
         x=alt.X('xFeaturePos:Q', title='', scale=alt.Scale(domain=[min_x-1, max_x+1])).axis(
@@ -827,9 +882,8 @@ def category_plot_sources_hex(_map, flip=True):
             'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])
         ).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
         color=alt.Color(
-            'source:N', scale=alt.Scale(scheme='lightmulti')),
-        fill=alt.Color('source:N', scale=alt.Scale(
-            scheme='lightmulti')).legend(orient='bottom'),
+            'source:N', scale=color_scale),
+        fill=alt.Color('source:N', scale=color_scale).legend(orient='bottom'),
         stroke=alt.value('black'),
         strokeWidth=alt.value(1.0)
     ).transform_calculate(
@@ -899,12 +953,11 @@ def category_plot_clustering_hex(map):
 
     hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
     c = alt.Chart(pd_winning_categories).mark_point(shape=hexagon, size=size**2).encode(
-        x=alt.X('xFeaturePos:Q', title='', scale=alt.Scale(
-            domain=[min_x-1, max_x+1])).axis(
+        x=alt.X('xFeaturePos:Q', title='', scale=alt.Scale(domain=[min_x-1, max_x+1])).axis(
             grid=False, tickOpacity=0, domainOpacity=0),
         y=alt.Y('y:Q', sort=alt.EncodingSortField(
-            'y', order='descending'), title='', scale=alt.Scale(
-            domain=[min_y-1, max_y+1])).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
+            'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])
+        ).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
         color=alt.Color(
             'value:Q', scale=alt.Scale(scheme='lightmulti')),
         fill=alt.Color('value:Q', scale=alt.Scale(
