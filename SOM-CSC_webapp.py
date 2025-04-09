@@ -110,16 +110,27 @@ if 'initialized_colors' not in st.session_state:
 # Load data first
 raw_dataset_path = './data/csc211_mastertable_clean_observationlevel_COMPLETE_xmatchSimbad1arcsec_log_norm_id/'
 
+# Initialize session state for dataframes
 if 'raw_df' not in st.session_state:
     st.session_state.raw_df = load_split_csvs(raw_dataset_path)
 
+if 'full_df' not in st.session_state:
+    st.session_state.full_df = st.session_state.raw_df[['hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
+                                                        'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm', 'var_newq_b_log_norm']]
+    st.session_state.full_df.columns = st.session_state.full_df.columns.str.replace(
+        '_log_norm', '')
+
 if 'df' not in st.session_state:
-    st.session_state.df = st.session_state.raw_df[['hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
-                                                   'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm', 'var_newq_b_log_norm']]
+    st.session_state.df = st.session_state.full_df.copy()
+
+if 'full_df_index' not in st.session_state:
+    st.session_state.full_df_index = st.session_state.raw_df[['id', 'hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
+                                                              'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm', 'var_newq_b_log_norm']]
+    st.session_state.full_df_index.columns = st.session_state.full_df_index.columns.str.replace(
+        '_log_norm', '')
 
 if 'df_index' not in st.session_state:
-    st.session_state.df_index = st.session_state.raw_df[['id', 'hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
-                                                         'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm', 'var_newq_b_log_norm']]
+    st.session_state.df_index = st.session_state.full_df_index.copy()
 
 if 'df_to_norm' not in st.session_state:
     st.session_state.df_to_norm = st.session_state.raw_df[[
@@ -157,11 +168,16 @@ if 'SOM_loaded' not in st.session_state:
         with open(default_model_path, 'rb') as f:
             file = pickle.load(f)
             st.session_state.som, features = file[0], file[1]
-            st.session_state.df = st.session_state.df[features]
-            X = st.session_state.df.to_numpy()
 
+            # Update the working dataframes to use only the features the model was trained on
+            st.session_state.df = st.session_state.full_df[features].copy()
+
+            # Ensure the index version includes the ID column
             index_features = ['id'] + features
-            st.session_state.df_index = st.session_state.df_index[index_features]
+            st.session_state.df_index = st.session_state.full_df_index[index_features].copy(
+            )
+
+            X = st.session_state.df.to_numpy()
             X_index = st.session_state.df_index.to_numpy()
 
             st.session_state.SOM_loaded = True
@@ -199,11 +215,16 @@ if som_model is not None:
     # get topology
     topology = st.session_state.som.topology
     dim = st.session_state.som.get_weights().shape[0]
-    st.session_state.df = st.session_state.df[features]
-    X = st.session_state.df.to_numpy()
 
+    # Update the working dataframes to use only the features the model was trained on
+    st.session_state.df = st.session_state.full_df[features].copy()
+
+    # Ensure the index version includes the ID column
     index_features = ['id'] + features
-    st.session_state.df_index = st.session_state.df_index[index_features]
+    st.session_state.df_index = st.session_state.full_df_index[index_features].copy(
+    )
+
+    X = st.session_state.df.to_numpy()
     X_index = st.session_state.df_index.to_numpy()
 
     if st.sidebar.button('Load SOM'):
@@ -237,11 +258,9 @@ else:
 
     # Only update df and X if we're not already using a loaded model
     if not st.session_state.SOM_loaded:
-        st.session_state.df = st.session_state.df[features]
-        X = st.session_state.df.to_numpy()
-
-        st.session_state.df_index = st.session_state.df_index[index_features]
-        X_index = st.session_state.df_index.to_numpy()
+        # Use the selected features but don't permanently modify the original dataframes
+        X = st.session_state.full_df[features].to_numpy()
+        X_index = st.session_state.full_df_index[index_features].to_numpy()
     else:
         # Get the current features and data for the loaded model
         X = st.session_state.df.to_numpy()
@@ -272,29 +291,16 @@ else:
         # When training a new model, reconstruct the dataframes with the selected features
         # This ensures we're working with the fresh original data, not filtered by previous models
 
-        # Fix the column selection to get exactly the features we need
-        # First for each feature, find the corresponding column in raw_df (with or without _log_norm suffix)
-        raw_df_columns = []
-        for feature in features:
-            # Try to find the exact column or with _log_norm suffix
-            if feature in st.session_state.raw_df.columns:
-                raw_df_columns.append(feature)
-            elif feature + '_log_norm' in st.session_state.raw_df.columns:
-                raw_df_columns.append(feature + '_log_norm')
+        # Create fresh dataframes with the selected features - but don't overwrite the full dataframes
+        df_selected = st.session_state.full_df[features].copy()
 
-        # Add the ID column if it exists
-        if 'id' in st.session_state.raw_df.columns:
-            raw_df_columns = ['id'] + raw_df_columns
-
-        # Create fresh dataframes with the selected features
-        df_selected = st.session_state.raw_df[raw_df_columns].copy()
-        df_selected.columns = df_selected.columns.str.replace('_log_norm', '')
-
-        # Create the training data array, excluding the ID column
-        X = df_selected.drop('id', axis=1, errors='ignore').to_numpy()
+        # Create the training data array
+        X = df_selected.to_numpy()
 
         # Create the index data with IDs
-        X_index = df_selected.to_numpy() if 'id' in df_selected.columns else X
+        df_index_selected = st.session_state.full_df_index[[
+            'id'] + features].copy()
+        X_index = df_index_selected.to_numpy()
 
         # Verify that the number of features matches what's expected
         if X.shape[1] != len(features):
@@ -302,7 +308,7 @@ else:
                 f"Feature count mismatch: Selected {len(features)} features but data has {X.shape[1]} columns.")
             st.error(f"Selected features: {features}")
             st.error(
-                f"Data columns: {df_selected.drop('id', axis=1, errors='ignore').columns.tolist()}")
+                f"Data columns: {df_selected.columns.tolist()}")
         else:
             if not skip_errors:
                 errors_bar = st.progress(
@@ -321,10 +327,10 @@ else:
                 st.session_state.SOM_loaded = True
                 st.session_state.SOM_loaded_trining = True
 
-                # Update session state with the new dataframes
-                st.session_state.df = df_selected.drop(
-                    'id', axis=1, errors='ignore')
-                st.session_state.df_index = df_selected
+                # Update session state with the trained features but preserve full dataframes
+                st.session_state.df = st.session_state.full_df[features].copy()
+                st.session_state.df_index = st.session_state.full_df_index[[
+                    'id'] + features]
 
                 st.balloons()
                 download_som_model_bytes.clear()
@@ -357,6 +363,8 @@ else:
 if st.session_state.SOM_loaded:
     # When a model is loaded (either default, uploaded, or generated), ensure we have proper X and X_index
     if not 'X' in locals() or not 'X_index' in locals():
+        # Get the features this model was trained with
+        features = st.session_state.df.columns.tolist()
         X = st.session_state.df.to_numpy()
         X_index = st.session_state.df_index.to_numpy()
 
@@ -1048,7 +1056,7 @@ if st.session_state.SOM_loaded:
                 )
 
                 # Download the classification results if available
-                if 'dataset_classified' in st.session_state:
+                if 'dataset_classified' in st.session_state and enable_classification:
                     classified_csv = download_classified_csv(
                         st.session_state.dataset_classified)
                     show_download_button(
