@@ -559,21 +559,42 @@ if st.session_state.SOM_loaded:
                                      dispersion, _ in dispersion_list]
 
                 # Plot the histogram of all normalized dispersion values
-                fig, ax = plt.subplots(figsize=(10, 6))
-                ax.hist(dispersion_values, bins=30,
-                        edgecolor='black', alpha=0.7)
-                ax.set_title('Histogram of Source Dispersion')
-                ax.set_xlabel(
-                    'Dispersion')
-                ax.set_ylabel('Number of Sources')
-                ax.grid(axis='y', alpha=0.75)
+                # fig, ax = plt.subplots(figsize=(10, 6))
+                # ax.hist(dispersion_values, bins=30,
+                #        edgecolor='black', alpha=0.7)
+                # ax.set_title('Histogram of Source Dispersion')
+                # ax.set_xlabel(
+                #    'Dispersion')
+                # ax.set_ylabel('Number of Sources')
+                # ax.grid(axis='y', alpha=0.75)
                 # Display the plot in Streamlit
+                # with st.popover("Show Dispersion Distribution"):
+                #    st.pyplot(fig)
+
+                dispersion_list.sort(key=lambda x: x[1], reverse=True)
+
+                dispersion_ms = [
+                    f"{name[0]} [{name[1]}] [{name[2]}]" for name in dispersion_list]
+
+                dispersion_disp = [dispersion[1]
+                                   for dispersion in dispersion_list]
+                dispersion_counts = [dispersion[2]
+                                     for dispersion in dispersion_list]
+                # Scatter plot dispersion values vs number of detections
+                fig, ax = plt.subplots(figsize=(10, 6))
+                ax.scatter(dispersion_counts, dispersion_disp, s=5)
+                ax.set_title('Number of Detections vs Dispersion')
+                ax.set_xlabel('Number of Detections')
+                ax.set_ylabel('Dispersion')
+                # dispersion index log scale
+                # ax.set_xscale('log')
+                # tick x
+                ax.set_xticks([1, 15, 20, 40, 60, 80, 100, 120])
+                plt.grid(True, which="both", ls="--", lw=0.5, alpha=0.7)
+                # ax.set_yscale('log')
                 with st.popover("Show Dispersion Distribution"):
                     st.pyplot(fig)
 
-                dispersion_list.sort(key=lambda x: x[1], reverse=True)
-                dispersion_ms = [
-                    f"{name[0]} [{name[1]}] [{name[2]}]" for name in dispersion_list]
                 sources = st.multiselect(
                     'Select sources name [Dispersion index] [N. of detections]', dispersion_ms)
                 visualization_type = st.radio(
