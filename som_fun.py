@@ -387,6 +387,8 @@ def plot_activation_response_hex(som, X_index, color_type='linear', color_scheme
     activation_map = activation_map.reset_index()
     activation_map = activation_map.rename(columns={'index': 'y'})
 
+    activation_map = activation_map.rename(columns={'x': 'y', 'y': 'x'})
+
     min_x = activation_map['x'].min()
     max_x = activation_map['x'].max()
     min_y = activation_map['y'].min()

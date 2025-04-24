@@ -558,6 +558,8 @@ if st.session_state.SOM_loaded:
                 dispersion_values = [dispersion for _,
                                      dispersion, _ in dispersion_list]
 
+                dispersion_to_download = []
+
                 # Plot the histogram of all normalized dispersion values
                 # fig, ax = plt.subplots(figsize=(10, 6))
                 # ax.hist(dispersion_values, bins=30,
@@ -653,6 +655,61 @@ if st.session_state.SOM_loaded:
                                 st.session_state.som, X, st.session_state.raw_df['name'], sources)
                             category_plot_sources_hex(
                                 category_map, custom_colors=source_colors)
+
+                dispersion_list_i = get_dispersion(
+                    name_ids, id_to_pos, (np.max((2, min_counts)), max_counts))
+                # download the dataframe
+                for i in dispersion_list_i:
+                    name_i = i[0]
+                    dispersion_i = i[1]
+                    detections_i = i[2]
+
+                    # If the following conditions are met:
+                    # - beetween 2 and 15 detections only if dispersion >= 30
+                    # - between 15 and 20 detections only if dispersion >= 20
+                    # - between 20 and 100 detections only if dispersion >= 10
+                    # - above 100 detections: Inlcude everything
+                    # extrapolate all the detections from raw_df using the source name
+
+                    if detections_i >= 2 and detections_i < 15 and dispersion_i >= 30:
+                        dispersion_to_download.append(
+                            [name_i, dispersion_i, detections_i])
+                    elif detections_i >= 15 and detections_i < 20 and dispersion_i >= 20:
+                        dispersion_to_download.append(
+                            [name_i, dispersion_i, detections_i])
+                    elif detections_i >= 20 and detections_i < 100 and dispersion_i >= 10:
+                        dispersion_to_download.append(
+                            [name_i, dispersion_i, detections_i])
+                    elif detections_i >= 100:
+                        dispersion_to_download.append(
+                            [name_i, dispersion_i, detections_i])
+
+                # following this logic, I need to create a new dataframe with the detections that meet the conditions
+                # create a new dataframe with the detections that meet the conditions, also the dispersion index and the number of detections
+                dispersion_to_download_df = st.session_state.raw_df[st.session_state.raw_df['name'].isin(
+                    [name[0] for name in dispersion_to_download])].copy()
+                dispersion_to_download_df['dispersion'] = dispersion_to_download_df['name'].map(
+                    {name[0]: name[1] for name in dispersion_to_download})
+                # move this column right after the name column
+                dispersion_to_download_df.insert(
+                    dispersion_to_download_df.columns.get_loc('name') + 1, 'dispersion', dispersion_to_download_df.pop('dispersion'))
+
+                # drop the index column
+                dispersion_to_download_df = dispersion_to_download_df.reset_index(
+                    drop=True)
+
+                with st.expander("See the dataframe"):
+                    # Explain all the conditions
+                    st.write(
+                        "The following RAW dataframe includes detections that satisfy these criteria:")
+                    st.write(
+                        "- 2 to 14 detections with a dispersion of at least 30")
+                    st.write(
+                        "- 15 to 19 detections with a dispersion of at least 20")
+                    st.write(
+                        "- 20 to 99 detections with a dispersion of at least 10")
+                    st.write("- 100 or more detections with any dispersion value")
+                    st.write(dispersion_to_download_df)
 
             elif plot_type == 'Main Type Visualization':
                 if st.session_state.som.topology == 'rectangular':
