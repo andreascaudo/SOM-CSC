@@ -357,6 +357,8 @@ def plot_activation_response(som, X_index, color_type='linear', color_scheme='li
     activation_map = activation_map.reset_index()
     activation_map = activation_map.rename(columns={'index': 'y'})
 
+    activation_map = activation_map.rename(columns={'x': 'y', 'y': 'x'})
+
     min_value = activation_map['value'][activation_map['value'] > 0].min()
     max_value = activation_map['value'].max()
 
@@ -440,6 +442,8 @@ def feature_space_map_plot(weights, color_type='linear', color_scheme='lightmult
     mean_weights = mean_weights.reset_index()
     mean_weights = mean_weights.rename(columns={'index': 'y'})
 
+    mean_weights = mean_weights.rename(columns={'x': 'y', 'y': 'x'})
+
     min_value = mean_weights['value'][mean_weights['value'] > 0].min()
     max_value = mean_weights['value'].max()
 
@@ -466,6 +470,8 @@ def feature_space_map_plot_hex(weights, color_type='linear', color_scheme='light
         var_name='x', value_name='value', ignore_index=False)
     mean_weights = mean_weights.reset_index()
     mean_weights = mean_weights.rename(columns={'index': 'y'})
+
+    mean_weights = mean_weights.rename(columns={'x': 'y', 'y': 'x'})
 
     min_x = mean_weights['x'].min()
     max_x = mean_weights['x'].max()
@@ -1146,6 +1152,8 @@ def features_plot_hex(_map, color_type, color_scheme, scaling=sum, flip=True):
     )
     st.write('## SOM feature plot')
     st.altair_chart(c, use_container_width=True)
+
+    return c
 
 
 def features_plot(_map, color_type, color_scheme, scaling=sum, flip=True):
