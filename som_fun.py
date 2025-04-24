@@ -1112,8 +1112,13 @@ def features_plot_hex(_map, color_type, color_scheme, scaling=sum, flip=True):
     min_y = np_map['y'].min()
     max_y = np_map['y'].max()
 
-    min_value = np_map['value'][np_map['value'] > 0].min()
+    min_value = np_map['value'].min()
     max_value = np_map['value'].max()
+
+    if color_type == "log" and min_value < 0:
+        st.warning(
+            "Log scale cannot be applied to features with negative values.")
+        return
 
     # get index from new_dimensions
     index = np.where(new_dimensions == len(_map))[0][0]
