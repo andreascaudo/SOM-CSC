@@ -169,6 +169,9 @@ if 'SOM_loaded' not in st.session_state:
             file = pickle.load(f)
             st.session_state.som, features = file[0], file[1]
 
+            # Reset feature scale ranges when loading a new model
+            reset_feature_scale_ranges()
+
             # Update the working dataframes to use only the features the model was trained on
             st.session_state.df = st.session_state.full_df[features].copy()
 
@@ -215,6 +218,9 @@ if som_model is not None:
     # get topology
     topology = st.session_state.som.topology
     dim = st.session_state.som.get_weights().shape[0]
+
+    # Reset feature scale ranges when loading a new model
+    reset_feature_scale_ranges()
 
     # Update the working dataframes to use only the features the model was trained on
     st.session_state.df = st.session_state.full_df[features].copy()
@@ -290,6 +296,9 @@ else:
     if st.sidebar.button('Generate SOM'):
         # When training a new model, reconstruct the dataframes with the selected features
         # This ensures we're working with the fresh original data, not filtered by previous models
+
+        # Reset feature scale ranges when generating a new model
+        reset_feature_scale_ranges()
 
         # Create fresh dataframes with the selected features - but don't overwrite the full dataframes
         df_selected = st.session_state.full_df[features].copy()
@@ -466,6 +475,20 @@ if st.session_state.SOM_loaded:
                 visualization_type = st.radio(
                     'Visualization type', ['Scatter', vis_type_string])
 
+                # Add visualization controls when Scatter is selected
+                jitter_amount = 0.5
+                show_grid = True
+                if visualization_type == 'Scatter':
+                    # Add a slider for jitter control
+                    jitter_amount = st.slider(
+                        'Jitter amount', 0.0, 1.0, 0.5, 0.01,
+                        help='Controls how much random jitter is applied to scatter points to avoid overlapping. Higher values spread points further apart.')
+
+                    # Add a toggle for grid visibility
+                    show_grid = st.checkbox(
+                        'Show grid background', value=True,
+                        help='Toggle the visibility of the grid background in scatter plots.')
+
                 # Add color customization option
                 customize_colors = st.checkbox(
                     'Customize colors for sources', key='customize_colors_source_name')
@@ -504,7 +527,8 @@ if st.session_state.SOM_loaded:
                     if st.session_state.som.topology == 'rectangular':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources(
-                                st.session_state.som, sources, st.session_state.raw_df, X, 'name', custom_colors=source_colors)
+                                st.session_state.som, sources, st.session_state.raw_df, X, 'name',
+                                custom_colors=source_colors, jitter_amount=jitter_amount, show_grid=show_grid)
                         elif visualization_type == 'Rectangular':
                             category_map = project_feature(
                                 st.session_state.som, X, st.session_state.raw_df['name'], sources)
@@ -513,7 +537,8 @@ if st.session_state.SOM_loaded:
                     elif st.session_state.som.topology == 'hexagonal':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources_hex(
-                                st.session_state.som, sources, st.session_state.raw_df, X, 'name', custom_colors=source_colors)
+                                st.session_state.som, sources, st.session_state.raw_df, X, 'name',
+                                custom_colors=source_colors, jitter_amount=jitter_amount, show_grid=show_grid)
                         elif visualization_type == 'Hexbin':
                             category_map = project_feature(
                                 st.session_state.som, X, st.session_state.raw_df['name'], sources)
@@ -560,19 +585,6 @@ if st.session_state.SOM_loaded:
 
                 dispersion_to_download = []
 
-                # Plot the histogram of all normalized dispersion values
-                # fig, ax = plt.subplots(figsize=(10, 6))
-                # ax.hist(dispersion_values, bins=30,
-                #        edgecolor='black', alpha=0.7)
-                # ax.set_title('Histogram of Source Dispersion')
-                # ax.set_xlabel(
-                #    'Dispersion')
-                # ax.set_ylabel('Number of Sources')
-                # ax.grid(axis='y', alpha=0.75)
-                # Display the plot in Streamlit
-                # with st.popover("Show Dispersion Distribution"):
-                #    st.pyplot(fig)
-
                 dispersion_list.sort(key=lambda x: x[1], reverse=True)
 
                 dispersion_ms = [
@@ -601,6 +613,20 @@ if st.session_state.SOM_loaded:
                     'Select sources name [Dispersion index] [N. of detections]', dispersion_ms)
                 visualization_type = st.radio(
                     'Visualization type', ['Scatter', vis_type_string])
+
+                # Add visualization controls when Scatter is selected
+                jitter_amount = 0.5
+                show_grid = True
+                if visualization_type == 'Scatter':
+                    # Add a slider for jitter control
+                    jitter_amount = st.slider(
+                        'Jitter amount', 0.0, 1.0, 0.5, 0.01,
+                        help='Controls how much random jitter is applied to scatter points to avoid overlapping. Higher values spread points further apart.')
+
+                    # Add a toggle for grid visibility
+                    show_grid = st.checkbox(
+                        'Show grid background', value=True,
+                        help='Toggle the visibility of the grid background in scatter plots.')
 
                 # Add color customization option
                 customize_colors = st.checkbox(
@@ -640,7 +666,8 @@ if st.session_state.SOM_loaded:
                     if st.session_state.som.topology == 'rectangular':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources(
-                                st.session_state.som, sources, st.session_state.raw_df, X, 'name', custom_colors=source_colors)
+                                st.session_state.som, sources, st.session_state.raw_df, X, 'name',
+                                custom_colors=source_colors, jitter_amount=jitter_amount, show_grid=show_grid)
                         elif visualization_type == 'Rectangular':
                             category_map = project_feature(
                                 st.session_state.som, X, st.session_state.raw_df['name'], sources)
@@ -649,7 +676,8 @@ if st.session_state.SOM_loaded:
                     elif st.session_state.som.topology == 'hexagonal':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources_hex(
-                                st.session_state.som, sources, st.session_state.raw_df, X, 'name', custom_colors=source_colors)
+                                st.session_state.som, sources, st.session_state.raw_df, X, 'name',
+                                custom_colors=source_colors, jitter_amount=jitter_amount, show_grid=show_grid)
                         elif visualization_type == 'Hexbin':
                             category_map = project_feature(
                                 st.session_state.som, X, st.session_state.raw_df['name'], sources)
@@ -744,6 +772,20 @@ if st.session_state.SOM_loaded:
                 visualization_type = st.radio(
                     'Visualization type', ['Scatter', vis_type_string])
 
+                # Add visualization controls when Scatter is selected
+                jitter_amount = 0.5
+                show_grid = True
+                if visualization_type == 'Scatter':
+                    # Add a slider for jitter control
+                    jitter_amount = st.slider(
+                        'Jitter amount', 0.0, 1.0, 0.5, 0.01,
+                        help='Controls how much random jitter is applied to scatter points to avoid overlapping. Higher values spread points further apart.')
+
+                    # Add a toggle for grid visibility
+                    show_grid = st.checkbox(
+                        'Show grid background', value=True,
+                        help='Toggle the visibility of the grid background in scatter plots.')
+
                 # Add color customization option
                 customize_colors = st.checkbox(
                     'Customize colors for main types', key='customize_colors_main_type')
@@ -780,7 +822,8 @@ if st.session_state.SOM_loaded:
                     if st.session_state.som.topology == 'rectangular':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources(
-                                st.session_state.som, main_type_, st.session_state.raw_df, X, simbad_type, custom_colors=type_colors)
+                                st.session_state.som, main_type_, st.session_state.raw_df, X, simbad_type,
+                                custom_colors=type_colors, jitter_amount=jitter_amount, show_grid=show_grid)
                         elif visualization_type == 'Rectangular':
                             category_map = project_feature(
                                 st.session_state.som, X, st.session_state.raw_df[simbad_type], main_type_)
@@ -789,12 +832,24 @@ if st.session_state.SOM_loaded:
                     elif st.session_state.som.topology == 'hexagonal':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources_hex(
-                                st.session_state.som, main_type_, st.session_state.raw_df, X, simbad_type, custom_colors=type_colors)
+                                st.session_state.som, main_type_, st.session_state.raw_df, X, simbad_type,
+                                custom_colors=type_colors, jitter_amount=jitter_amount, show_grid=show_grid)
                         elif visualization_type == 'Hexbin':
                             category_map = project_feature(
                                 st.session_state.som, X, st.session_state.raw_df[simbad_type], main_type_)
                             category_plot_sources_hex(
                                 category_map, custom_colors=type_colors)
+
+                    # Add the empty hexagons plot for label count visualization
+                    if st.session_state.som.topology == 'hexagonal':
+                        st.write("---")
+                        st.write("### Label Count Visualization")
+                        with st.expander("See explanation"):
+                            st.write(
+                                "This visualization shows the number of unique main types present in each neuron. Each hexagon is colored based on how many different main types are represented by the detections mapped to that neuron. For example, if a neuron contains 3 detections all of type 'YSO', its count (for coloring) would be 1. If it contains detections from 'YSO', 'AGN', and 'Seyfert', its count (for coloring) would be 3. "
+                                "Furthermore, the number displayed inside each non-empty hexagon indicates the dominance percentage of the most frequent main type within that neuron. For example, if a neuron contains 5 detections of 'YSO', 3 of 'AGN', and 2 of 'Star', 'YSO' is the most frequent. Its dominance would be (5 / (5+3+2)) * 100 = 50%, and thus '50' would be displayed inside that hexagon.")
+                        plot_empty_hexagons(
+                            st.session_state.som, X, st.session_state.raw_df, main_type_)
             elif plot_type == 'Feature Visualization':
                 dataset_choice = st.radio(
                     'Choose the dataset', ['Use the main dataset', 'Upload a new dataset'])
@@ -809,6 +864,16 @@ if st.session_state.SOM_loaded:
                             'For string-value columns, none of the scaling methods will work. Instead, the most common value will be shown.')
                         st.write(
                             'Additionally, the frequency of samples at a specific neuron indicates the number of times that neuron was identified as the best matching unit for a sample.')
+                        st.write('---')
+                        st.write('**Global Color Scaling**')
+                        st.write(
+                            'The color scales are globally consistent for each feature and metric type. This means:')
+                        st.write(
+                            '- Single-value metrics (min, median, max, mean) for the same feature share a consistent color scale')
+                        st.write(
+                            '- Statistical metrics (sum, std) for the same feature have their own consistent color scale')
+                        st.write(
+                            'This enables reliable visual comparison across different plots of the same feature.')
                     feature = st.selectbox(
                         'Feature', st.session_state.raw_df.columns.to_list())
                     scaling = st.selectbox(
@@ -818,6 +883,9 @@ if st.session_state.SOM_loaded:
                     var = project_feature(
                         st.session_state.som, X, st.session_state.raw_df[feature])
 
+                    # Precompute all scaling metrics for global scale initialization
+                    precompute_feature_scale_ranges(var, feature)
+
                     is_string_var = is_string(var)
 
                     if st.session_state.som.topology == 'rectangular':
@@ -825,13 +893,13 @@ if st.session_state.SOM_loaded:
                             category_plot_sources(var)
                         else:
                             features_plot(var, type_option,
-                                          color_scheme, scaling=scaling)
+                                          color_scheme, scaling=scaling, feature_name=feature)
                     else:
                         if is_string_var:
                             category_plot_sources_hex(var)
                         else:
                             features_plot_hex(
-                                var, type_option, color_scheme, scaling=scaling)
+                                var, type_option, color_scheme, scaling=scaling, feature_name=feature)
                 elif dataset_choice == 'Upload a new dataset':
                     with st.expander("See explanation"):
                         st.write('This visualization tool enables coloring of the pre-trained SOM based on data from a newly uploaded dataset, allowing users to dynamically select which feature to use for coloring. Users have the flexibility to upload a new dataset and choose a specific feature that will be applied to color the previously trained SOM.')
@@ -849,6 +917,16 @@ if st.session_state.SOM_loaded:
                             '*...*')
                         st.write(
                             '*xn, yn, zn, n*')
+                        st.write('---')
+                        st.write('**Global Color Scaling**')
+                        st.write(
+                            'The color scales are globally consistent for each feature and metric type. This means:')
+                        st.write(
+                            '- Single-value metrics (min, median, max, mean) for the same feature share a consistent color scale')
+                        st.write(
+                            '- Statistical metrics (sum, std) for the same feature have their own consistent color scale')
+                        st.write(
+                            'This enables reliable visual comparison across different plots of the same feature.')
                     if st.session_state.SOM_loaded:
                         uploaded_file = st.file_uploader(
                             "Upload your CSV file", type="csv")
@@ -868,13 +946,20 @@ if st.session_state.SOM_loaded:
                                 dataset[feature_to_trans_and_norm], st.session_state.df_to_norm)
                             # All rows, only the last column
                             Xx = dataset.iloc[:, :-1].to_numpy()
-                            feature = dataset.iloc[:, -1]
+                            feature_data = dataset.iloc[:, -1]
+                            # Get the name of the last column (the feature)
+                            uploaded_feature_name = dataset.columns[-1]
 
                             if dataset is not None:
                                 st.session_state['new_dataset'] = dataset
                                 # Call to project_feature and features_plot goes here, using the new dataset
                                 var = project_feature(
-                                    st.session_state.som, Xx, feature)
+                                    st.session_state.som, Xx, feature_data)
+
+                                # Precompute all scaling metrics for global scale initialization
+                                precompute_feature_scale_ranges(
+                                    var, uploaded_feature_name)
+
                                 is_string_var = is_string(var)
 
                                 if st.session_state.som.topology == 'rectangular':
@@ -882,14 +967,14 @@ if st.session_state.SOM_loaded:
                                         category_plot_sources(var)
                                     else:
                                         features_plot(
-                                            var, type_option, color_scheme, scaling=scaling)
+                                            var, type_option, color_scheme, scaling=scaling, feature_name=uploaded_feature_name)
                                 else:
                                     if is_string_var:
                                         category_plot_sources_hex(
                                             var)
                                     else:
                                         features_plot_hex(
-                                            var, type_option, color_scheme, scaling=scaling)
+                                            var, type_option, color_scheme, scaling=scaling, feature_name=uploaded_feature_name)
                             else:
                                 st.error(
                                     "Dataset validation failed. Please check the column names and ensure there are no empty values.")
@@ -995,7 +1080,7 @@ if st.session_state.SOM_loaded:
                 classify = st.form_submit_button('Get Classification')
 
                 if classify and dataset_toclassify is not None:
-                    assignments_central, assignments_neighbor = get_classification(
+                    assignments_central, assignments_neighbor, all_confidences_central, all_confidences_neighbor = get_classification(
                         som_map_id, dataset_toclassify, simbad_dataset, SIMBAD_classes, parameters_classification, dim, st.session_state.som)
                     # classify = False
                     dataset_classified = update_dataset_to_classify(
@@ -1005,7 +1090,7 @@ if st.session_state.SOM_loaded:
                                                                               'confidence_central', 'assigned_class_neighbor', 'confidence_neighbor', 'is_classified']]
 
                     classification_results = describe_classified_dataset(
-                        dataset_classified, assignments_central, assignments_neighbor)
+                        dataset_classified, assignments_central, assignments_neighbor, all_confidences_central, all_confidences_neighbor)
 
                     st.title("Summary of Classification Assignment")
 
@@ -1047,18 +1132,65 @@ if st.session_state.SOM_loaded:
                             st.pyplot(fig)
 
                     # Histogram of confidence levels (Central)
-                    if not classification_results['confidence_levels_central'].empty:
+                    if not classification_results['all_confidences_central'].empty:
                         with st.popover("Histogram: Central Neuron Confidence Levels"):
                             st.write(
                                 "Histogram of Confidence Levels for Central Neurons")
+                            st.write(
+                                "Green bars represent confidence values that passed the threshold, while light red bars represent values below the threshold.")
                             fig, ax = plt.subplots(figsize=(10, 6))
-                            ax.hist(classification_results['confidence_levels_central'], bins=20, color='green',
-                                    edgecolor='black', alpha=0.7)
+
+                            # Split data into passed and failed thresholds
+                            passed_df = classification_results['all_confidences_central'][
+                                classification_results['all_confidences_central']['passed_threshold']]
+                            failed_df = classification_results['all_confidences_central'][
+                                ~classification_results['all_confidences_central']['passed_threshold']]
+
+                            # Create bins for the histogram
+                            # Ensure a bin edge falls exactly at the threshold value
+                            threshold = parameters_classification['confidence_threshold']
+                            # Create bins with an edge exactly at the threshold
+                            bins = np.concatenate([
+                                # 10 bins from 0 to threshold
+                                np.linspace(0, threshold, 21),
+                                # 10 bins from threshold to 1, excluding duplicate threshold
+                                np.linspace(threshold, 1, 24)[1:]
+                            ])
+
+                            # Plot both histograms with a clearer visual distinction
+                            if not failed_df.empty:
+                                # Plot values below threshold
+                                ax.hist(failed_df['confidence_central'],
+                                        # Only use bins up to threshold
+                                        bins=bins[bins <= threshold],
+                                        range=(0, threshold),
+                                        color='lightcoral',
+                                        edgecolor='black',
+                                        alpha=0.5,
+                                        label='Below Threshold')
+
+                            if not passed_df.empty:
+                                # Plot values above threshold
+                                ax.hist(passed_df['confidence_central'],
+                                        # Only use bins from threshold up
+                                        bins=bins[bins >= threshold],
+                                        range=(threshold, 1),
+                                        color='green',
+                                        edgecolor='black',
+                                        alpha=0.7,
+                                        label='Above Threshold')
+
+                            # Add a vertical line at the threshold
+                            ax.axvline(x=parameters_classification['confidence_threshold'] + 0.001,
+                                       color='red', linestyle='--',
+                                       label=f'Threshold ({parameters_classification["confidence_threshold"]})')
+
                             ax.set_title(
                                 'Histogram of Assignment Confidence Levels (Central)', fontsize=16)
                             ax.set_xlabel('Confidence Level', fontsize=14)
                             ax.set_ylabel('Number of Detections', fontsize=14)
                             ax.grid(axis='y', alpha=0.7)
+                            ax.legend()
                             st.pyplot(fig)
 
                     # Bar chart of assigned classes (Neighbor)
@@ -1068,7 +1200,7 @@ if st.session_state.SOM_loaded:
                                 "Number of Detections Assigned to Each Class (Neighbor)")
                             fig, ax = plt.subplots(figsize=(10, 6))
                             classification_results['assigned_class_counts_neighbor'].plot(
-                                kind='bar', color='skyblue', edgecolor='black', ax=ax)
+                                kind='bar', color='skyblue', edgecolor='black', width=0.8, ax=ax)
                             ax.set_title(
                                 'Number of Detections Assigned to Each Class (Neighbor)', fontsize=16)
                             ax.set_xlabel('Assigned Class', fontsize=14)
@@ -1078,21 +1210,74 @@ if st.session_state.SOM_loaded:
                             ax.tick_params(axis='y', labelsize=12)
                             st.pyplot(fig)
 
-                    if not classification_results['confidence_levels_neighbor'].empty:
+                    # Histogram of confidence levels (Neighbor)
+                    if not classification_results['all_confidences_neighbor'].empty:
                         # Histogram of confidence levels (Neighbor)
                         with st.popover("Histogram: Neighbor Neuron Confidence Levels"):
                             st.write(
                                 "Histogram of Confidence Levels for Neighbor Neurons")
+                            st.write(
+                                "Green bars represent confidence values that passed the threshold, while light red bars represent values below the threshold.")
                             fig, ax = plt.subplots(figsize=(10, 6))
-                            bin = np.arange(start=-0.5, stop=(6+1), step=1)
-                            ax.hist(classification_results['confidence_levels_neighbor'], bins=bin, color='green',
-                                    edgecolor='black', alpha=0.7)
+
+                            # Split data into passed and failed thresholds
+                            passed_df = classification_results['all_confidences_neighbor'][
+                                classification_results['all_confidences_neighbor']['passed_threshold']]
+                            failed_df = classification_results['all_confidences_neighbor'][
+                                ~classification_results['all_confidences_neighbor']['passed_threshold']]
+
+                            # Create bins for the histogram - neighbor uses integer values (count of neighbors)
+                            max_neighbors = 6  # Maximum number of neighbors in hexagonal grid
+                            # Create standard integer-centered bins
+                            bins = np.arange(-0.5, max_neighbors + 1.5, 1)
+
+                            # Define the threshold value for classification
+                            threshold = parameters_classification['neighbor_majority_threshold']
+
+                            # Plot both histograms with a clearer visual distinction
+                            if not failed_df.empty:
+                                # Plot values below threshold
+                                below_threshold_mask = failed_df['confidence_neighbor'] < threshold
+                                if below_threshold_mask.any():
+                                    ax.hist(failed_df['confidence_neighbor'][below_threshold_mask],
+                                            bins=bins,
+                                            color='lightcoral',
+                                            edgecolor='black',
+                                            alpha=0.5,
+                                            label='Below Threshold')
+
+                            if not passed_df.empty:
+                                # Plot values above threshold
+                                above_threshold_mask = passed_df['confidence_neighbor'] >= threshold
+                                if above_threshold_mask.any():
+                                    ax.hist(passed_df['confidence_neighbor'][above_threshold_mask],
+                                            bins=bins,
+                                            color='green',
+                                            edgecolor='black',
+                                            alpha=0.7,
+                                            label='Above Threshold')
+
+                            # Add a vertical line at the threshold
+                            # Position the line between bars to avoid cutting through a bar
+                            threshold = parameters_classification['neighbor_majority_threshold']
+                            # For integer thresholds, place line 0.5 below
+                            # For non-integer thresholds, place line at the threshold
+                            threshold_line_position = threshold - \
+                                0.5 if threshold == int(
+                                    threshold) else threshold
+                            ax.axvline(x=threshold_line_position,
+                                       color='red', linestyle='--',
+                                       label=f'Threshold ({int(threshold) if threshold == int(threshold) else threshold})')
+
                             ax.set_title(
                                 'Histogram of Assignment Confidence Levels (Neighbor)', fontsize=16)
-                            ax.set_xlabel('Confidence Level', fontsize=14)
+                            ax.set_xlabel(
+                                'Number of Neighbors with Same Class', fontsize=14)
                             ax.set_ylabel('Number of Detections', fontsize=14)
-                            ax.set_xlim([0, 6+1])
+                            ax.set_xlim([0, max_neighbors + 1])
+                            ax.set_xticks(range(max_neighbors + 1))
                             ax.grid(axis='y', alpha=0.7)
+                            ax.legend()
                             st.pyplot(fig)
 
     enable_download = st.checkbox("Enable Downloads", value=False,
