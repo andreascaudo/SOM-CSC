@@ -1140,49 +1140,163 @@ if st.session_state.SOM_loaded:
                                 "Green bars represent confidence values that passed the threshold, while light red bars represent values below the threshold.")
                             fig, ax = plt.subplots(figsize=(10, 6))
 
-                            # Split data into passed and failed thresholds
+                            # Create bins for the histogram
+                            # Custom bin creation with adaptive range and threshold alignment
+                            def create_adaptive_bins(data, threshold, bin_size=0.05):
+                                """
+                                Create bins with the following rules:
+                                1. Range from min to max of data
+                                2. Configurable bin size (default 0.05)
+                                3. Split bins at threshold if needed
+                                4. Adjust first/last bins if min/max don't align with bin_size
+                                """
+                                min_val = data.min()
+                                max_val = data.max()
+
+                                # Handle edge case where all data is the same
+                                if min_val == max_val:
+                                    return np.array([min_val - 0.001, min_val + 0.001])
+
+                                # Find the aligned min (floor to nearest bin_size multiple)
+                                aligned_min = np.floor(
+                                    min_val / bin_size) * bin_size
+
+                                # Find the aligned max (ceil to nearest bin_size multiple)
+                                aligned_max = np.ceil(
+                                    max_val / bin_size) * bin_size
+
+                                # Ensure we have a reasonable range
+                                if aligned_max - aligned_min < bin_size:
+                                    aligned_max = aligned_min + bin_size
+
+                                # Create bins starting from aligned_min
+                                bins = []
+                                current = aligned_min
+
+                                # Add the first bin edge - use actual min if it doesn't align
+                                if abs(min_val - aligned_min) > 1e-10:
+                                    bins.append(min_val)
+                                    # Add the next aligned boundary
+                                    if aligned_min + bin_size <= max_val:
+                                        bins.append(aligned_min + bin_size)
+                                        current = aligned_min + bin_size
+                                    else:
+                                        current = max_val
+                                else:
+                                    bins.append(aligned_min)
+                                    current = aligned_min + bin_size
+
+                                # Add regular bins until we approach the threshold
+                                while current < threshold and current < max_val:
+                                    bins.append(current)
+                                    current += bin_size
+
+                                # Handle threshold - add it if it doesn't coincide with existing bin edge
+                                if threshold >= min_val and threshold <= max_val:
+                                    if len(bins) == 0 or abs(bins[-1] - threshold) > 1e-10:
+                                        bins.append(threshold)
+
+                                # Continue adding regular bins after threshold
+                                threshold_aligned = np.ceil(
+                                    threshold / bin_size) * bin_size
+                                current = threshold_aligned
+
+                                while current < max_val:
+                                    # Only add if significantly different from threshold and previous bins
+                                    if abs(current - threshold) > 1e-10 and (len(bins) == 0 or abs(current - bins[-1]) > 1e-10):
+                                        bins.append(current)
+                                    current += bin_size
+
+                                # Add the final bin edge - use actual max if it doesn't align
+                                if len(bins) == 0 or abs(max_val - bins[-1]) > 1e-10:
+                                    bins.append(max_val)
+
+                                # Clean up and sort
+                                bins = sorted(
+                                    list(set([round(b, 10) for b in bins])))
+
+                                # Ensure we have at least 2 bin edges
+                                if len(bins) < 2:
+                                    bins = [min_val, max_val]
+
+                                return np.array(bins)
+
+                            # Get all confidence values to determine min/max
+                            all_confidence_values = classification_results[
+                                'all_confidences_central']['confidence_central']
+                            threshold = parameters_classification['confidence_threshold']
+
+                            # User option for bin size
+                            bin_size_option = st.selectbox(
+                                'Bin Width',
+                                [0.05, 0.01],
+                                index=0,
+                                help='Choose the width of histogram bins. Smaller bins provide more detail but may be noisier.'
+                            )
+
+                            # Create adaptive bins
+                            bins = create_adaptive_bins(
+                                all_confidence_values, threshold, bin_size=bin_size_option)
+
+                            # Split data into passed and failed thresholds first
                             passed_df = classification_results['all_confidences_central'][
                                 classification_results['all_confidences_central']['passed_threshold']]
                             failed_df = classification_results['all_confidences_central'][
                                 ~classification_results['all_confidences_central']['passed_threshold']]
 
-                            # Create bins for the histogram
-                            # Ensure a bin edge falls exactly at the threshold value
-                            threshold = parameters_classification['confidence_threshold']
-                            # Create bins with an edge exactly at the threshold
-                            bins = np.concatenate([
-                                # 10 bins from 0 to threshold
-                                np.linspace(0, threshold, 21),
-                                # 10 bins from threshold to 1, excluding duplicate threshold
-                                np.linspace(threshold, 1, 24)[1:]
-                            ])
+                            # Explanation of histogram creation methodology
+                            with st.expander("Histogram Explanation"):
+                                st.write("### Adaptive Binning")
+                                st.write(f"""
+                                **1. Standard Bin Width:** Most bins have a width of {bin_size_option} for consistent granularity.
+                                
+                                **2. Threshold Alignment:** When the confidence threshold doesn't align with regular {bin_size_option} intervals:
+                                - The bin containing the threshold is split into two parts
+                                - Example: If threshold = 0.535, the 0.53-0.54 bin becomes 0.53-0.535 and 0.535-0.54
+                                
+                                **3. Boundary Adjustment:** When minimum or maximum values don't align with {bin_size_option} intervals:
+                                - First/last bins are adjusted to start/end at actual data boundaries
+                                - Example: If minimum = 0.347, first bin becomes 0.347-0.35 (width = 0.003)
+                                
+                                **4. Clean Separation:** Data is strictly separated at the threshold:
+                                - Pink bars: Confidence ≤ threshold (failed classification)
+                                - Green bars: Confidence > threshold (successful classification)
+                                """)
 
-                            # Plot both histograms with a clearer visual distinction
+                            # Plot both histograms with improved handling and strict separation
                             if not failed_df.empty:
-                                # Plot values below threshold
-                                ax.hist(failed_df['confidence_central'],
-                                        # Only use bins up to threshold
-                                        bins=bins[bins <= threshold],
-                                        range=(0, threshold),
-                                        color='lightcoral',
-                                        edgecolor='black',
-                                        alpha=0.5,
-                                        label='Below Threshold')
+                                # Plot values below threshold - only use bins up to and including threshold
+                                below_threshold_data = failed_df['confidence_central'].values
+                                # Include threshold bin
+                                below_threshold_bins = bins[bins <=
+                                                            threshold + 1e-10]
+
+                                counts_below, bin_edges, patches = ax.hist(below_threshold_data,
+                                                                           bins=below_threshold_bins,
+                                                                           color='lightcoral',
+                                                                           edgecolor='black',
+                                                                           alpha=0.5,
+                                                                           label='Below Threshold',
+                                                                           align='mid')
 
                             if not passed_df.empty:
-                                # Plot values above threshold
-                                ax.hist(passed_df['confidence_central'],
-                                        # Only use bins from threshold up
-                                        bins=bins[bins >= threshold],
-                                        range=(threshold, 1),
-                                        color='green',
-                                        edgecolor='black',
-                                        alpha=0.7,
-                                        label='Above Threshold')
+                                # Plot values above threshold - only use bins greater than threshold
+                                above_threshold_data = passed_df['confidence_central'].values
+                                # Exclude threshold bin
+                                above_threshold_bins = bins[bins >
+                                                            threshold - 1e-10]
+
+                                counts_above, bin_edges, patches = ax.hist(above_threshold_data,
+                                                                           bins=above_threshold_bins,
+                                                                           color='green',
+                                                                           edgecolor='black',
+                                                                           alpha=0.7,
+                                                                           label='Above Threshold',
+                                                                           align='mid')
 
                             # Add a vertical line at the threshold
-                            ax.axvline(x=parameters_classification['confidence_threshold'] + 0.001,
-                                       color='red', linestyle='--',
+                            ax.axvline(x=parameters_classification['confidence_threshold'],
+                                       color='red', linestyle='--', linewidth=2,
                                        label=f'Threshold ({parameters_classification["confidence_threshold"]})')
 
                             ax.set_title(
@@ -1191,6 +1305,11 @@ if st.session_state.SOM_loaded:
                             ax.set_ylabel('Number of Detections', fontsize=14)
                             ax.grid(axis='y', alpha=0.7)
                             ax.legend()
+
+                            # Ensure proper x-axis limits to show all data
+                            ax.set_xlim(all_confidence_values.min(
+                            ) - 0.01, all_confidence_values.max() + 0.01)
+
                             st.pyplot(fig)
 
                     # Bar chart of assigned classes (Neighbor)
