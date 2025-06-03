@@ -1878,7 +1878,7 @@ def describe_classified_dataset(dataset_classified, assignments_central, assignm
     results['percentage_assigned'] = (
         results['total_classified_rows'] / results['total_unclassified_before']) * 100
 
-    if ['assigned_class_central', 'confidence_central'] <= assignments_central_df.columns.tolist():
+    if {'assigned_class_central', 'confidence_central'}.issubset(assignments_central_df.columns):
         # Distribution of assigned classes central
         results['assigned_class_counts_central'] = assignments_central_df['assigned_class_central'].value_counts()
         # Distribution of confidence levels central
@@ -1887,7 +1887,7 @@ def describe_classified_dataset(dataset_classified, assignments_central, assignm
         results['assigned_class_counts_central'] = pd.Series(dtype='int64')
         results['confidence_levels_central'] = pd.Series(dtype='float64')
 
-    if ['assigned_class_neighbor', 'confidence_neighbor'] <= assignments_neighbor_df.columns.tolist():
+    if {'assigned_class_neighbor', 'confidence_neighbor'}.issubset(assignments_neighbor_df.columns):
         # Distribution of assigned classes neighbor
         results['assigned_class_counts_neighbor'] = assignments_neighbor_df['assigned_class_neighbor'].value_counts()
         # Distribution of confidence levels neighbor
