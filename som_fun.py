@@ -198,10 +198,12 @@ def train_som(X, x, y, input_len, sigma, learning_rate, train_iterations, topolo
     # initialization
     som = MiniSom(x=x, y=y, input_len=input_len,
                   sigma=sigma, learning_rate=learning_rate, topology=topology, random_seed=seed)
+
     som.random_weights_init(X)
     # training
     # start time
     start = time.time()
+
     som.train_random(X, train_iterations)  # training with 100 iterations
     # end time
     end = time.time()
@@ -2202,7 +2204,7 @@ def get_classification(som_map_id, dataset_toclassify, simbad_dataset, SIMBAD_cl
     classified_positions = [id_to_pos[id_]
                             for id_ in classified_ids if id_ in id_to_pos]
     # Extract classes for classified detections
-    classified_classes = simbad_dataset['main_type'].tolist()
+    classified_classes = simbad_dataset[st.session_state.simbad_type].tolist()
 
     # Create a mapping from positions to classes
     neuron_class_map = defaultdict(list)
@@ -2494,7 +2496,7 @@ def count_unique_main_types_per_neuron(som, X, raw_df, main_types=None):
     # Map each data point to its winning neuron and track by main type
     for i, x in enumerate(X):
         # Get main type
-        main_type = raw_df.iloc[i]['main_type']
+        main_type = raw_df.iloc[i][st.session_state.simbad_type]
 
         # Skip if no main type or if not in the selected types
         if pd.isna(main_type):

@@ -171,8 +171,8 @@ st.session_state.df_index.columns = st.session_state.df_index.columns.str.replac
     '_log_norm', '')
 
 # GMM_cluster_labels = st.session_state.df['cluster']
-simbad_type = 'otype'  # otype
-main_type = st.session_state.raw_df[simbad_type]
+st.session_state.simbad_type = 'otype'  # otype
+main_type = st.session_state.raw_df[st.session_state.simbad_type]
 # default_main_type = ['QSO', 'AGN', 'Seyfert_1', 'Seyfert_2', 'HMXB',
 #                     'LMXB', 'XB', 'YSO', 'TTau*', 'Orion_V*']
 
@@ -384,7 +384,9 @@ else:
         st.write(
             f"**Topographic Error:** {topographic_error:.4f}")
 
+
 if st.session_state.SOM_loaded:
+
     # When a model is loaded (either default, uploaded, or generated), ensure we have proper X and X_index
     if not 'X' in locals() or not 'X_index' in locals():
         # Get the features this model was trained with
@@ -1209,11 +1211,11 @@ if st.session_state.SOM_loaded:
                     if st.session_state.som.topology == 'rectangular':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources(
-                                st.session_state.som, main_type_, st.session_state.raw_df, X, simbad_type,
+                                st.session_state.som, main_type_, st.session_state.raw_df, X, st.session_state.simbad_type,
                                 custom_colors=type_colors, jitter_amount=jitter_amount, show_grid=show_grid)
                         elif visualization_type == 'Rectangular':
                             category_map = project_feature(
-                                st.session_state.som, X, st.session_state.raw_df[simbad_type], main_type_)
+                                st.session_state.som, X, st.session_state.raw_df[st.session_state.simbad_type], main_type_)
 
                             # Check if clustering overlay is enabled and results are available
                             if overlay_clustering and clustering_results is not None:
@@ -1284,11 +1286,11 @@ if st.session_state.SOM_loaded:
                     elif st.session_state.som.topology == 'hexagonal':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources_hex(
-                                st.session_state.som, main_type_, st.session_state.raw_df, X, simbad_type,
+                                st.session_state.som, main_type_, st.session_state.raw_df, X, st.session_state.simbad_type,
                                 custom_colors=type_colors, jitter_amount=jitter_amount, show_grid=show_grid)
                         elif visualization_type == 'Hexbin':
                             category_map = project_feature(
-                                st.session_state.som, X, st.session_state.raw_df[simbad_type], main_type_)
+                                st.session_state.som, X, st.session_state.raw_df[st.session_state.simbad_type], main_type_)
 
                             # Check if clustering overlay is enabled and results are available
                             if overlay_clustering and clustering_results is not None:
@@ -1953,7 +1955,7 @@ if st.session_state.SOM_loaded:
                     'Choose the dataset', ['Use the main dataset', 'Upload a new dataset'])
                 if dataset_choice == 'Use the main dataset':
                     dataset_toclassify = st.session_state.df_index[pd.isna(
-                        st.session_state.raw_df[simbad_type])]
+                        st.session_state.raw_df[st.session_state.simbad_type])]
                 elif dataset_choice == 'Upload a new dataset':
                     if st.session_state.SOM_loaded:
                         uploaded_file = st.file_uploader(
@@ -1972,8 +1974,9 @@ if st.session_state.SOM_loaded:
                                 st.error(f"An error occurred: {e}")
 
                 simbad_dataset = st.session_state.raw_df[pd.notna(
-                    st.session_state.raw_df[simbad_type])]
-                SIMBAD_classes = set(st.session_state.raw_df[simbad_type])
+                    st.session_state.raw_df[st.session_state.simbad_type])]
+                SIMBAD_classes = set(
+                    st.session_state.raw_df[st.session_state.simbad_type])
 
                 classify = st.form_submit_button('Get Classification')
 
