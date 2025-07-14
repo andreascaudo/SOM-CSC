@@ -8,8 +8,9 @@ SOM-CSC is a Streamlit-based web application that allows astronomers and researc
 
 1. Explore CSC data using the powerful Self-Organizing Maps technique
 2. Train custom SOMs with different features and hyperparameters
-3. Visualize data patterns and clusters in an interactive interface
-4. Classify astronomical sources based on their characteristics
+3. Select different datasets
+4. Visualize data patterns and clusters in an interactive interface
+5. Classify astronomical sources based on their characteristics
 
 ## Features
 
