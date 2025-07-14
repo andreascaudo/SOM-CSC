@@ -7,6 +7,8 @@ from tools import *
 import glob
 import os
 import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
 
 st.set_page_config(
     page_title="SOM CSC",
@@ -107,8 +109,28 @@ if 'custom_colors' not in st.session_state:
 if 'initialized_colors' not in st.session_state:
     st.session_state.initialized_colors = set()
 
-# Load data first
-raw_dataset_path = './data/csc211_mastertable_clean_observationlevel_COMPLETE_xmatchSimbad1arcsec_log_norm_id/'
+# Dataset selection in sidebar - must be early to affect session state initialization
+st.sidebar.header('Dataset Selection')
+dataset_version = st.sidebar.selectbox(
+    'Dataset version', ['CSC 2.1.1', 'CSC 2.1.1 clean'], index=0, key='dataset_selector')
+
+if dataset_version == 'CSC 2.1.1':
+    raw_dataset_path = './data/csc211_mastertable_clean_observationlevel_COMPLETE_xmatchSimbad1arcsec_log_norm_id/'
+elif dataset_version == 'CSC 2.1.1 clean':
+    raw_dataset_path = './data/csc212_mastertable_clean_log_norm_id/'
+
+# Check if dataset has changed and clear relevant session state
+if 'current_dataset' not in st.session_state:
+    st.session_state.current_dataset = dataset_version
+elif st.session_state.current_dataset != dataset_version:
+    # Dataset changed - clear data-related session state
+    keys_to_clear = ['raw_df', 'full_df', 'df', 'full_df_index',
+                     'df_index', 'df_to_norm', 'all_original_features']
+    for key in keys_to_clear:
+        if key in st.session_state:
+            del st.session_state[key]
+    st.session_state.current_dataset = dataset_version
+    st.rerun()
 
 # Initialize session state for dataframes
 if 'raw_df' not in st.session_state:
@@ -116,7 +138,7 @@ if 'raw_df' not in st.session_state:
 
 if 'full_df' not in st.session_state:
     st.session_state.full_df = st.session_state.raw_df[['hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
-                                                        'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm', 'var_newq_b_log_norm']]
+                                                        'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm']]
     st.session_state.full_df.columns = st.session_state.full_df.columns.str.replace(
         '_log_norm', '')
 
@@ -125,7 +147,7 @@ if 'df' not in st.session_state:
 
 if 'full_df_index' not in st.session_state:
     st.session_state.full_df_index = st.session_state.raw_df[['id', 'hard_hm', 'hard_hs', 'hard_ms', 'powlaw_gamma_log_norm', 'var_prob_b', 'var_prob_s', 'var_prob_h',
-                                                              'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm', 'var_newq_b_log_norm']]
+                                                              'bb_kt_log_norm', 'var_ratio_b_log_norm', 'var_ratio_h_log_norm', 'var_ratio_s_log_norm']]
     st.session_state.full_df_index.columns = st.session_state.full_df_index.columns.str.replace(
         '_log_norm', '')
 
@@ -149,12 +171,12 @@ st.session_state.df_index.columns = st.session_state.df_index.columns.str.replac
     '_log_norm', '')
 
 # GMM_cluster_labels = st.session_state.df['cluster']
-simbad_type = 'main_type'  # otype
+simbad_type = 'otype'  # otype
 main_type = st.session_state.raw_df[simbad_type]
 # default_main_type = ['QSO', 'AGN', 'Seyfert_1', 'Seyfert_2', 'HMXB',
 #                     'LMXB', 'XB', 'YSO', 'TTau*', 'Orion_V*']
 
-default_main_type = ['YSO', 'XrayBin', 'Seyfert', 'AGN']
+default_main_type = ['HighMassXBin', 'PartofG', 'QSO', 'Star', 'X', 'YSO']
 color_schemes = ['lightmulti', 'blueorange',
                  'viridis', 'redyellowblue', 'plasma', 'greenblue', 'redblue']
 
@@ -199,13 +221,8 @@ st.write("""
 To train a new SOM, click the **>** arrow icon in the top-left corner to expand the sidebar.
 """)
 
-
-# sidebar for the dataset
-st.sidebar.header('User input')
-
-# toogle to select new vs old dataset
-# new dataset
-raw_dataset_path = './data/csc211_mastertable_clean_observationlevel_COMPLETE_xmatchSimbad1arcsec_log_norm_id/'
+# Sidebar for model management
+st.sidebar.header('Model Management')
 
 # Let the user load a SOM model
 som_model = st.sidebar.file_uploader(
@@ -215,6 +232,7 @@ som_model = st.sidebar.file_uploader(
 if som_model is not None:
     file = pickle.load(som_model)
     st.session_state.som, features = file[0], file[1]
+    st.session_state.selected_features = features
     # get topology
     topology = st.session_state.som.topology
     dim = st.session_state.som.get_weights().shape[0]
@@ -252,14 +270,11 @@ else:
     features_for_selection = st.session_state.all_original_features
 
     # Fix the default features selection to avoid KeyError
-    if 'var_newq_b' in features_for_selection:
-        default_features = [
-            f for f in features_for_selection if f != 'var_newq_b']
-    else:
-        default_features = features_for_selection.copy()
+    default_features = features_for_selection.copy()
 
     features = st.sidebar.multiselect(
         'Features', features_for_selection, default_features, help='Select the features to be used for training the SOM.')
+    st.session_state.selected_features = features
     index_features = ['id'] + features
 
     # Only update df and X if we're not already using a loaded model
@@ -812,6 +827,378 @@ if st.session_state.SOM_loaded:
                                     f"{type_name}", st.session_state.custom_colors[type_name], key=f"color_main_{type_name}")
                                 st.session_state.custom_colors[type_name] = selected_color
 
+                # Add clustering overlay option
+                overlay_clustering = st.checkbox(
+                    'Overlay feature-based clustering', value=False,
+                    help='Overlay clustering information based on selected feature value maps',
+                    key='overlay_clustering_main_type')
+
+                # Initialize variables needed for clustering
+                clustering_results = None
+                optimal_k = None
+
+                if overlay_clustering:
+                    # Initialize cluster colors if not already in session state
+                    if 'custom_cluster_colors' not in st.session_state:
+                        st.session_state.custom_cluster_colors = {}
+
+                    # Add option to customize cluster colors
+                    customize_cluster_colors = st.checkbox(
+                        'Customize colors for clusters', key='customize_cluster_colors',
+                        help='Customize the border colors used for different clusters')
+
+                    # Add cluster visualization method selection
+                    cluster_viz_method = st.selectbox(
+                        'Cluster visualization method',
+                        ['Enhanced Borders', 'Standard Borders'],
+                        index=0,
+                        help='Choose how to display cluster information: Enhanced Borders (thick colored borders with white outline) or Standard Borders (thin colored borders)')
+
+                    # Add controls for border width customization
+                    st.write("#### Border Width Customization")
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        enhanced_border_width = st.slider(
+                            'Enhanced border width', 1, 10, 4, 1,
+                            help='Thickness of cluster outline borders')
+
+                    with col2:
+                        standard_border_width = st.slider(
+                            'Standard border width', 1, 5, 1, 1,
+                            help='Thickness of regular hexagon borders')
+
+                    if customize_cluster_colors:
+                        with st.expander("Cluster Color Customization"):
+                            st.write("Select custom colors for each cluster:")
+
+                            # Initialize enhanced and standard border color dictionaries
+                            if 'custom_enhanced_border_colors' not in st.session_state:
+                                st.session_state.custom_enhanced_border_colors = {}
+                            if 'custom_standard_border_colors' not in st.session_state:
+                                st.session_state.custom_standard_border_colors = {}
+
+                            # Define default cluster colors for enhanced borders
+                            default_enhanced_colors = ['#cccccc', '#FF0000', '#00FF00', '#0000FF', '#FFFF00',
+                                                       '#FF00FF', '#00FFFF', '#FFA500', '#800080', '#FFC0CB']
+
+                            # Default standard border color (black for all clusters)
+                            default_standard_color = '#000000'
+
+                            # Show color pickers for potential clusters (limit to 10)
+                            for i in range(10):
+                                st.write(f"**Cluster {i}**")
+                                col1, col2 = st.columns(2)
+
+                                with col1:
+                                    # Enhanced border color
+                                    current_enhanced_color = st.session_state.custom_enhanced_border_colors.get(
+                                        i, default_enhanced_colors[i % len(default_enhanced_colors)])
+                                    selected_enhanced_color = st.color_picker(
+                                        f"Enhanced border", current_enhanced_color, key=f"enhanced_cluster_{i}")
+                                    st.session_state.custom_enhanced_border_colors[
+                                        i] = selected_enhanced_color
+
+                                with col2:
+                                    # Standard border color
+                                    current_standard_color = st.session_state.custom_standard_border_colors.get(
+                                        i, default_standard_color)
+                                    selected_standard_color = st.color_picker(
+                                        f"Standard border", current_standard_color, key=f"standard_cluster_{i}")
+                                    st.session_state.custom_standard_border_colors[
+                                        i] = selected_standard_color
+
+                    # Clustering Settings moved outside of the expander
+                    st.write("### Clustering Settings")
+                    st.write(
+                        "Select feature and value map for clustering overlay:")
+
+                    # Feature selection dropdown - use the same features as Feature Visualization
+                    clustering_feature = st.selectbox(
+                        'Feature for clustering',
+                        st.session_state.raw_df.columns.to_list(),
+                        help='Select the feature to use for generating clustering overlay'
+                    )
+
+                    # Value map selection dropdown
+                    clustering_value_map = st.selectbox(
+                        'Value map type',
+                        ['minimum', 'median', 'maximum'],
+                        help='Select which value map to use for clustering (min, median, or max across the SOM map)'
+                    )
+
+                    # Perform clustering if overlay is enabled
+                    clustering_feature_map = project_feature(
+                        st.session_state.som, X, st.session_state.raw_df[clustering_feature])
+
+                    # Extract values from each neuron based on the selected value map
+                    neuron_values = []
+                    neuron_positions = []
+
+                    for i in range(len(clustering_feature_map)):
+                        for j in range(len(clustering_feature_map[i])):
+                            neuron_data = clustering_feature_map[i][j]
+                            if neuron_data and neuron_data[0] is not None:
+                                # Remove None values and compute the selected statistic
+                                valid_values = [
+                                    v for v in neuron_data if v is not None]
+                                if valid_values:
+                                    if clustering_value_map == 'minimum':
+                                        neuron_value = min(valid_values)
+                                    elif clustering_value_map == 'median':
+                                        neuron_value = np.median(
+                                            valid_values)
+                                    else:  # maximum
+                                        neuron_value = max(valid_values)
+
+                                    neuron_values.append(neuron_value)
+                                    neuron_positions.append((i, j))
+
+                    # Perform clustering only if we have enough neurons with data
+                    # Need at least 4 neurons for meaningful clustering
+                    if len(neuron_values) >= 4:
+                        # Convert to numpy array for clustering
+                        X_clustering = np.array(
+                            neuron_values).reshape(-1, 1)
+
+                        # Determine optimal k using elbow method
+                        # Ensure we don't exceed data points
+                        max_k = min(10, len(neuron_values) - 1)
+                        k_range = range(2, max_k + 1)
+                        wcss = []
+
+                        for k in k_range:
+                            kmeans = KMeans(
+                                n_clusters=k, random_state=42, n_init=10)
+                            kmeans.fit(X_clustering)
+                            wcss.append(kmeans.inertia_)
+
+                        # Find elbow point (simple method: maximum second derivative)
+                        if len(wcss) >= 3:
+                            # Calculate second derivatives
+                            second_derivatives = []
+                            for i in range(1, len(wcss) - 1):
+                                second_der = wcss[i-1] - \
+                                    2*wcss[i] + wcss[i+1]
+                                second_derivatives.append(second_der)
+
+                            # Find the k with maximum second derivative (elbow point)
+                            elbow_idx = np.argmax(second_derivatives)
+                            # +1 because second_derivatives starts from index 1
+                            optimal_k = k_range[elbow_idx + 1]
+                        else:
+                            optimal_k = 2  # Default to 2 if not enough data points
+
+                        # Perform final clustering with optimal k
+                        final_kmeans = KMeans(
+                            n_clusters=optimal_k, random_state=42, n_init=10)
+                        cluster_labels = final_kmeans.fit_predict(
+                            X_clustering)
+
+                        # Store clustering results
+                        clustering_results = {
+                            'neuron_positions': neuron_positions,
+                            'neuron_values': neuron_values,
+                            'cluster_labels': cluster_labels,
+                            'wcss': wcss,
+                            'k_range': list(k_range),
+                            'optimal_k': optimal_k
+                        }
+
+                        # Add cluster filtering option
+                        st.write("### Cluster Display Options")
+                        cluster_options = [
+                            f"Cluster {i}" for i in range(optimal_k)]
+
+                        # Initialize session state for selected clusters if not exists
+                        if 'selected_clusters' not in st.session_state:
+                            st.session_state.selected_clusters = cluster_options.copy()
+
+                        # Reset selected clusters if optimal_k changed
+                        if len(st.session_state.selected_clusters) != optimal_k:
+                            st.session_state.selected_clusters = cluster_options.copy()
+
+                        selected_clusters = st.multiselect(
+                            'Select clusters to display',
+                            options=cluster_options,
+                            default=st.session_state.selected_clusters,
+                            help='Choose which clusters to show in the visualization. Unselected clusters will be hidden.',
+                            key='cluster_filter'
+                        )
+
+                        # Update session state
+                        st.session_state.selected_clusters = selected_clusters
+
+                        # Create a set of selected cluster indices for filtering
+                        selected_cluster_indices = {
+                            int(cluster.split()[1]) for cluster in selected_clusters}
+
+                        # Filter clustering results based on selected clusters
+                        if len(selected_clusters) > 0:
+                            # Create filtered versions of the clustering data
+                            filtered_positions = []
+                            filtered_labels = []
+
+                            for pos, label in zip(neuron_positions, cluster_labels):
+                                if label in selected_cluster_indices:
+                                    filtered_positions.append(pos)
+                                    filtered_labels.append(label)
+
+                            # Update clustering results with filtered data
+                            clustering_results['filtered_neuron_positions'] = filtered_positions
+                            clustering_results['filtered_cluster_labels'] = filtered_labels
+                            clustering_results['selected_cluster_indices'] = selected_cluster_indices
+                        else:
+                            # If no clusters selected, hide all clusters
+                            clustering_results['filtered_neuron_positions'] = [
+                            ]
+                            clustering_results['filtered_cluster_labels'] = []
+                            clustering_results['selected_cluster_indices'] = set(
+                            )
+
+                        # Debug outputs placed inside an expander
+                        with st.expander("Clustering Debug Information"):
+                            # Plot WCSS curve
+                            col1, col2 = st.columns(2)
+
+                            with col1:
+                                st.write("#### Elbow Method - WCSS vs K")
+                                fig_elbow, ax_elbow = plt.subplots(
+                                    figsize=(8, 6))
+                                ax_elbow.plot(k_range, wcss, 'bo-',
+                                              linewidth=2, markersize=8)
+                                ax_elbow.axvline(x=optimal_k, color='red', linestyle='--', linewidth=2,
+                                                 label=f'Optimal k = {optimal_k}')
+                                ax_elbow.set_xlabel('Number of Clusters (k)')
+                                ax_elbow.set_ylabel(
+                                    'Within-Cluster Sum of Squares (WCSS)')
+                                ax_elbow.set_title(
+                                    'Elbow Method for Optimal k')
+                                ax_elbow.grid(True, alpha=0.3)
+                                ax_elbow.legend()
+                                st.pyplot(fig_elbow)
+
+                            with col2:
+                                st.write("#### Cluster Assignments")
+                                st.write(
+                                    f"**Selected Feature:** {clustering_feature}")
+                                st.write(
+                                    f"**Value Map Type:** {clustering_value_map}")
+                                st.write(
+                                    f"**Number of Neurons with Data:** {len(neuron_values)}")
+                                st.write(
+                                    f"**Optimal Number of Clusters:** {optimal_k}")
+
+                                # Show cluster distribution
+                                cluster_counts = pd.Series(
+                                    cluster_labels).value_counts().sort_index()
+
+                                st.write("**All Clusters Distribution:**")
+                                for cluster_id, count in cluster_counts.items():
+                                    st.write(
+                                        f"Cluster {cluster_id}: {count} neurons")
+
+                                # Show selected clusters information
+                                if len(selected_clusters) > 0:
+                                    st.write("**Selected Clusters:**")
+                                    selected_cluster_counts = {i: cluster_counts.get(
+                                        i, 0) for i in selected_cluster_indices}
+                                    for cluster_id, count in sorted(selected_cluster_counts.items()):
+                                        st.write(
+                                            f"Cluster {cluster_id}: {count} neurons")
+
+                                    total_selected_neurons = sum(
+                                        selected_cluster_counts.values())
+                                    st.write(
+                                        f"**Total Selected Neurons:** {total_selected_neurons}")
+                                else:
+                                    st.write(
+                                        "**No clusters selected for display**")
+
+                            # Plot cluster assignments on a simple grid
+                            st.write("#### Cluster Assignment Visualization")
+                            fig_clusters, ax_clusters = plt.subplots(
+                                figsize=(10, 8))
+
+                            # Create a grid to show cluster assignments
+                            som_shape = st.session_state.som.get_weights(
+                            ).shape[:2]
+                            # -1 for neurons without data
+                            cluster_grid = np.full(som_shape, -1)
+
+                            # Use filtered cluster data for the visualization
+                            filtered_positions = clustering_results.get(
+                                'filtered_neuron_positions', [])
+                            filtered_labels = clustering_results.get(
+                                'filtered_cluster_labels', [])
+                            selected_cluster_indices = clustering_results.get(
+                                'selected_cluster_indices', set())
+
+                            for (i, j), cluster_id in zip(filtered_positions, filtered_labels):
+                                cluster_grid[i, j] = cluster_id
+
+                            # Create a masked array to make "no data" areas transparent
+                            cluster_grid_masked = np.ma.masked_where(
+                                cluster_grid == -1, cluster_grid)
+
+                            # Create a custom colormap with distinct colors for clusters (no color for no data)
+                            cluster_colors = ['#cccccc', '#000000', '#333333', '#666666', '#999999',
+                                              '#1a1a1a', '#4d4d4d', '#808080', '#b3b3b3', '#e6e6e6']
+
+                            # Use custom colors if enabled (only for selected clusters)
+                            if customize_cluster_colors:
+                                colors = [st.session_state.custom_enhanced_border_colors.get(i, cluster_colors[i % len(cluster_colors)])
+                                          for i in sorted(selected_cluster_indices)]
+                            else:
+                                # Use colors for selected clusters only
+                                colors = [cluster_colors[i % len(cluster_colors)] for i in sorted(
+                                    selected_cluster_indices)]
+
+                            # Create a custom colormap
+                            from matplotlib.colors import ListedColormap
+                            custom_cmap = ListedColormap(colors) if colors else ListedColormap([
+                                '#ffffff'])  # White if no clusters
+
+                            # Create a custom normalization to map values correctly
+                            from matplotlib.colors import BoundaryNorm
+                            if len(selected_cluster_indices) > 0:
+                                # Map selected cluster indices to color indices
+                                sorted_indices = sorted(
+                                    selected_cluster_indices)
+                                min_cluster = min(sorted_indices)
+                                max_cluster = max(sorted_indices)
+                                bounds = np.arange(
+                                    min_cluster - 0.5, max_cluster + 1.5, 1)
+                                norm = BoundaryNorm(bounds, custom_cmap.N)
+                            else:
+                                # No clusters selected
+                                bounds = [-0.5, 0.5]
+                                norm = BoundaryNorm(bounds, 1)
+
+                            # Plot the cluster grid with the custom colormap
+                            im = ax_clusters.imshow(
+                                cluster_grid_masked.T, cmap=custom_cmap, norm=norm, aspect='equal', origin='lower')
+                            ax_clusters.set_title(
+                                f'Cluster Assignments - {len(selected_cluster_indices)} Selected Clusters\n({clustering_feature} - {clustering_value_map})')
+                            ax_clusters.set_xlabel('SOM X')
+                            ax_clusters.set_ylabel('SOM Y')
+
+                            # Add colorbar with custom ticks (only for selected clusters)
+                            if len(selected_cluster_indices) > 0:
+                                cbar = plt.colorbar(
+                                    im, ax=ax_clusters, ticks=sorted(selected_cluster_indices))
+                                cbar.ax.set_yticklabels(
+                                    [f'Cluster {i}' for i in sorted(selected_cluster_indices)])
+                            else:
+                                # No colorbar if no clusters selected
+                                pass
+
+                            st.pyplot(fig_clusters)
+
+                    else:
+                        st.warning(
+                            f"Not enough neurons with data for clustering. Found {len(neuron_values)} neurons, need at least 4.")
+
                 st.write(
                     "###### To update the map with the name of the selected sources, please click the 'Show Plot' button again.")
 
@@ -827,8 +1214,73 @@ if st.session_state.SOM_loaded:
                         elif visualization_type == 'Rectangular':
                             category_map = project_feature(
                                 st.session_state.som, X, st.session_state.raw_df[simbad_type], main_type_)
-                            category_plot_sources(
-                                category_map, custom_colors=type_colors)
+
+                            # Check if clustering overlay is enabled and results are available
+                            if overlay_clustering and clustering_results is not None:
+                                # Create a dictionary mapping neuron positions to cluster IDs (filtered)
+                                cluster_mapping = {pos: cluster_id for pos, cluster_id in
+                                                   zip(clustering_results.get('filtered_neuron_positions', []),
+                                                       clustering_results.get('filtered_cluster_labels', []))}
+
+                                # Define cluster border colors (same as used in the cluster visualization)
+                                cluster_colors = ['#cccccc', '#000000', '#333333', '#666666', '#999999',
+                                                  '#1a1a1a', '#4d4d4d', '#808080', '#b3b3b3', '#e6e6e6']
+
+                                # Get the selected cluster indices
+                                selected_cluster_indices = clustering_results.get(
+                                    'selected_cluster_indices', set(range(optimal_k)))
+
+                                # Prepare color dictionaries based on customization settings
+                                if customize_cluster_colors:
+                                    # Use custom colors from user input
+                                    enhanced_border_colors = {
+                                        i: st.session_state.custom_enhanced_border_colors.get(
+                                            i, '#cccccc')
+                                        for i in selected_cluster_indices
+                                    }
+                                    standard_border_colors = {
+                                        i: st.session_state.custom_standard_border_colors.get(
+                                            i, '#000000')
+                                        for i in selected_cluster_indices
+                                    }
+                                else:
+                                    # Use default colors: different colors for enhanced borders, black for standard
+                                    default_enhanced_colors = ['#cccccc', '#FF0000', '#00FF00', '#0000FF', '#FFFF00',
+                                                               '#FF00FF', '#00FFFF', '#FFA500', '#800080', '#FFC0CB']
+                                    enhanced_border_colors = {
+                                        i: default_enhanced_colors[i % len(
+                                            default_enhanced_colors)]
+                                        for i in selected_cluster_indices
+                                    }
+                                    standard_border_colors = {
+                                        i: '#000000'  # Black for all clusters by default
+                                        for i in selected_cluster_indices
+                                    }
+
+                                # Choose visualization method based on user selection
+                                if 'cluster_viz_method' in locals() and cluster_viz_method == 'Standard Borders':
+                                    # Use original thin borders (pass stroke width of 1)
+                                    category_plot_sources_hex(
+                                        category_map, custom_colors=type_colors,
+                                        cluster_mapping=cluster_mapping,
+                                        enhanced_border_colors=enhanced_border_colors,
+                                        standard_border_colors=standard_border_colors,
+                                        cluster_stroke_width=standard_border_width,
+                                        enhanced_border_width=enhanced_border_width,
+                                        som_shape=st.session_state.som.get_weights().shape[:2])
+                                else:
+                                    # Default: Enhanced Borders (current implementation with thick borders + white outline)
+                                    category_plot_sources_hex(
+                                        category_map, custom_colors=type_colors,
+                                        cluster_mapping=cluster_mapping,
+                                        enhanced_border_colors=enhanced_border_colors,
+                                        standard_border_colors=standard_border_colors,
+                                        cluster_stroke_width=enhanced_border_width,
+                                        enhanced_border_width=enhanced_border_width,
+                                        som_shape=st.session_state.som.get_weights().shape[:2])
+                            else:
+                                category_plot_sources_hex(
+                                    category_map, custom_colors=type_colors)
                     elif st.session_state.som.topology == 'hexagonal':
                         if visualization_type == 'Scatter':
                             scatter_plot_sources_hex(
@@ -837,19 +1289,84 @@ if st.session_state.SOM_loaded:
                         elif visualization_type == 'Hexbin':
                             category_map = project_feature(
                                 st.session_state.som, X, st.session_state.raw_df[simbad_type], main_type_)
-                            category_plot_sources_hex(
-                                category_map, custom_colors=type_colors)
 
-                    # Add the empty hexagons plot for label count visualization
-                    if st.session_state.som.topology == 'hexagonal':
-                        st.write("---")
-                        st.write("### Label Count Visualization")
-                        with st.expander("See explanation"):
-                            st.write(
-                                "This visualization shows the number of unique main types present in each neuron. Each hexagon is colored based on how many different main types are represented by the detections mapped to that neuron. For example, if a neuron contains 3 detections all of type 'YSO', its count (for coloring) would be 1. If it contains detections from 'YSO', 'AGN', and 'Seyfert', its count (for coloring) would be 3. "
-                                "Furthermore, the number displayed inside each non-empty hexagon indicates the dominance percentage of the most frequent main type within that neuron. For example, if a neuron contains 5 detections of 'YSO', 3 of 'AGN', and 2 of 'Star', 'YSO' is the most frequent. Its dominance would be (5 / (5+3+2)) * 100 = 50%, and thus '50' would be displayed inside that hexagon.")
-                        plot_empty_hexagons(
-                            st.session_state.som, X, st.session_state.raw_df, main_type_)
+                            # Check if clustering overlay is enabled and results are available
+                            if overlay_clustering and clustering_results is not None:
+                                # Create a dictionary mapping neuron positions to cluster IDs (filtered)
+                                cluster_mapping = {pos: cluster_id for pos, cluster_id in
+                                                   zip(clustering_results.get('filtered_neuron_positions', []),
+                                                       clustering_results.get('filtered_cluster_labels', []))}
+
+                                # Define cluster border colors (same as used in the cluster visualization)
+                                cluster_colors = ['#cccccc', '#000000', '#333333', '#666666', '#999999',
+                                                  '#1a1a1a', '#4d4d4d', '#808080', '#b3b3b3', '#e6e6e6']
+
+                                # Get the selected cluster indices
+                                selected_cluster_indices = clustering_results.get(
+                                    'selected_cluster_indices', set(range(optimal_k)))
+
+                                # Prepare color dictionaries based on customization settings
+                                if customize_cluster_colors:
+                                    # Use custom colors from user input
+                                    enhanced_border_colors = {
+                                        i: st.session_state.custom_enhanced_border_colors.get(
+                                            i, '#cccccc')
+                                        for i in selected_cluster_indices
+                                    }
+                                    standard_border_colors = {
+                                        i: st.session_state.custom_standard_border_colors.get(
+                                            i, '#000000')
+                                        for i in selected_cluster_indices
+                                    }
+                                else:
+                                    # Use default colors: different colors for enhanced borders, black for standard
+                                    default_enhanced_colors = ['#cccccc', '#FF0000', '#00FF00', '#0000FF', '#FFFF00',
+                                                               '#FF00FF', '#00FFFF', '#FFA500', '#800080', '#FFC0CB']
+                                    enhanced_border_colors = {
+                                        i: default_enhanced_colors[i % len(
+                                            default_enhanced_colors)]
+                                        for i in selected_cluster_indices
+                                    }
+                                    standard_border_colors = {
+                                        i: '#000000'  # Black for all clusters by default
+                                        for i in selected_cluster_indices
+                                    }
+
+                                # Choose visualization method based on user selection
+                                if 'cluster_viz_method' in locals() and cluster_viz_method == 'Standard Borders':
+                                    # Use original thin borders (pass stroke width of 1)
+                                    category_plot_sources_hex(
+                                        category_map, custom_colors=type_colors,
+                                        cluster_mapping=cluster_mapping,
+                                        enhanced_border_colors=enhanced_border_colors,
+                                        standard_border_colors=standard_border_colors,
+                                        cluster_stroke_width=standard_border_width,
+                                        enhanced_border_width=enhanced_border_width,
+                                        som_shape=st.session_state.som.get_weights().shape[:2])
+                                else:
+                                    # Default: Enhanced Borders (current implementation with thick borders + white outline)
+                                    category_plot_sources_hex(
+                                        category_map, custom_colors=type_colors,
+                                        cluster_mapping=cluster_mapping,
+                                        enhanced_border_colors=enhanced_border_colors,
+                                        standard_border_colors=standard_border_colors,
+                                        cluster_stroke_width=enhanced_border_width,
+                                        enhanced_border_width=enhanced_border_width,
+                                        som_shape=st.session_state.som.get_weights().shape[:2])
+                            else:
+                                category_plot_sources_hex(
+                                    category_map, custom_colors=type_colors)
+
+                        # Add the empty hexagons plot for label count visualization
+                        if st.session_state.som.topology == 'hexagonal':
+                            st.write("---")
+                            st.write("### Label Count Visualization")
+                            with st.expander("See explanation"):
+                                st.write(
+                                    "This visualization shows the number of unique main types present in each neuron. Each hexagon is colored based on how many different main types are represented by the detections mapped to that neuron. For example, if a neuron contains 3 detections all of type 'YSO', its count (for coloring) would be 1. If it contains detections from 'YSO', 'AGN', and 'Seyfert', its count (for coloring) would be 3. "
+                                    "Furthermore, the number displayed inside each non-empty hexagon indicates the dominance percentage of the most frequent main type within that neuron. For example, if a neuron contains 5 detections of 'YSO', 3 of 'AGN', and 2 of 'Star', 'YSO' is the most frequent. Its dominance would be (5 / (5+3+2)) * 100 = 50%, and thus '50' would be displayed inside that hexagon.")
+                            plot_empty_hexagons(
+                                st.session_state.som, X, st.session_state.raw_df, main_type_)
             elif plot_type == 'Feature Visualization':
                 dataset_choice = st.radio(
                     'Choose the dataset', ['Use the main dataset', 'Upload a new dataset'])
@@ -876,30 +1393,27 @@ if st.session_state.SOM_loaded:
                             'This enables reliable visual comparison across different plots of the same feature.')
                     feature = st.selectbox(
                         'Feature', st.session_state.raw_df.columns.to_list())
-                    scaling = st.selectbox(
-                        'Feature Scaling', ['mean', 'min', 'max', 'sum', 'median', 'std'])
+                    scaling_options = st.multiselect(
+                        'Feature Scaling (select up to 3)',
+                        ['mean', 'min', 'max', 'sum', 'median', 'std'],
+                        default=['mean'],
+                        max_selections=3,
+                        help='Select up to 3 scaling methods to display side by side')
                     st.write(
                         "###### Please click the 'Show Plot' button after choosing the dataset type or to display the map, in order to refresh the view.")
-                    var = project_feature(
-                        st.session_state.som, X, st.session_state.raw_df[feature])
 
-                    # Precompute all scaling metrics for global scale initialization
-                    precompute_feature_scale_ranges(var, feature)
+                    # Store the selected feature and scaling options for plotting outside the form
+                    if 'feature_viz_feature' not in st.session_state:
+                        st.session_state.feature_viz_feature = None
+                    if 'feature_viz_scaling' not in st.session_state:
+                        st.session_state.feature_viz_scaling = []
+                    if 'feature_viz_dataset_choice' not in st.session_state:
+                        st.session_state.feature_viz_dataset_choice = None
 
-                    is_string_var = is_string(var)
+                    st.session_state.feature_viz_feature = feature
+                    st.session_state.feature_viz_scaling = scaling_options
+                    st.session_state.feature_viz_dataset_choice = dataset_choice
 
-                    if st.session_state.som.topology == 'rectangular':
-                        if is_string_var:
-                            category_plot_sources(var)
-                        else:
-                            features_plot(var, type_option,
-                                          color_scheme, scaling=scaling, feature_name=feature)
-                    else:
-                        if is_string_var:
-                            category_plot_sources_hex(var)
-                        else:
-                            features_plot_hex(
-                                var, type_option, color_scheme, scaling=scaling, feature_name=feature)
                 elif dataset_choice == 'Upload a new dataset':
                     with st.expander("See explanation"):
                         st.write('This visualization tool enables coloring of the pre-trained SOM based on data from a newly uploaded dataset, allowing users to dynamically select which feature to use for coloring. Users have the flexibility to upload a new dataset and choose a specific feature that will be applied to color the previously trained SOM.')
@@ -930,56 +1444,440 @@ if st.session_state.SOM_loaded:
                     if st.session_state.SOM_loaded:
                         uploaded_file = st.file_uploader(
                             "Upload your CSV file", type="csv")
-                        scaling = st.selectbox(
-                            'Upload Scaling', ['mean', 'min', 'max', 'sum', 'median', 'std'])
+                        scaling_options = st.multiselect(
+                            'Feature Scaling (select up to 3)',
+                            ['mean', 'min', 'max', 'sum', 'median', 'std'],
+                            default=['mean'],
+                            max_selections=3,
+                            help='Select up to 3 scaling methods to display side by side')
                         st.write(
                             "###### Please click the 'Show Plot' button after choosing the dataset type or to display the map, in order to refresh the view.")
-                        if uploaded_file is not None:
-                            # Attempt to load and validate the dataset
-                            # try:
-                            # Assuming a new function 'validate_and_load_dataset' in som_fun.py
-                            dataset = validate_and_load_dataset(
-                                uploaded_file, features)
-                            feature_to_trans_and_norm = [
-                                'powlaw_gamma', 'bb_kt', 'var_ratio_b', 'var_ratio_h', 'var_ratio_s']
-                            dataset[feature_to_trans_and_norm] = transform_and_normalize(
-                                dataset[feature_to_trans_and_norm], st.session_state.df_to_norm)
-                            # All rows, only the last column
-                            Xx = dataset.iloc[:, :-1].to_numpy()
-                            feature_data = dataset.iloc[:, -1]
-                            # Get the name of the last column (the feature)
-                            uploaded_feature_name = dataset.columns[-1]
 
-                            if dataset is not None:
-                                st.session_state['new_dataset'] = dataset
-                                # Call to project_feature and features_plot goes here, using the new dataset
-                                var = project_feature(
-                                    st.session_state.som, Xx, feature_data)
+                        # Store selections for plotting outside the form
+                        st.session_state.feature_viz_uploaded_file = uploaded_file
+                        st.session_state.feature_viz_scaling = scaling_options
+                        st.session_state.feature_viz_dataset_choice = dataset_choice
 
-                                # Precompute all scaling metrics for global scale initialization
-                                precompute_feature_scale_ranges(
-                                    var, uploaded_feature_name)
+    # Multi-plot Feature Visualization - Outside the form for multiple scaling options
+    if (plot_submit and plot_type == 'Feature Visualization' and
+        hasattr(st.session_state, 'feature_viz_scaling') and
+            len(st.session_state.feature_viz_scaling) > 0):
 
-                                is_string_var = is_string(var)
+        def create_multi_features_plot(var_map, scaling_options, color_type, color_scheme, feature_name, topology='rectangular'):
+            """Create multiple feature plots side by side with shared colorbar"""
+            import altair as alt
+            import pandas as pd
+            import numpy as np
 
-                                if st.session_state.som.topology == 'rectangular':
-                                    if is_string_var:
-                                        category_plot_sources(var)
-                                    else:
-                                        features_plot(
-                                            var, type_option, color_scheme, scaling=scaling, feature_name=uploaded_feature_name)
-                                else:
-                                    if is_string_var:
-                                        category_plot_sources_hex(
-                                            var)
-                                    else:
-                                        features_plot_hex(
-                                            var, type_option, color_scheme, scaling=scaling, feature_name=uploaded_feature_name)
-                            else:
-                                st.error(
-                                    "Dataset validation failed. Please check the column names and ensure there are no empty values.")
-                            # except Exception as e:
-                            #    st.error(f"An error occurred: {e}")
+            if len(scaling_options) == 1:
+                # Single plot - use existing function
+                if topology == 'rectangular':
+                    if is_string(var_map):
+                        category_plot_sources(var_map)
+                    else:
+                        features_plot(var_map, color_type, color_scheme,
+                                      scaling=scaling_options[0], feature_name=feature_name)
+                else:
+                    if is_string(var_map):
+                        category_plot_sources_hex(var_map)
+                    else:
+                        features_plot_hex(var_map, color_type, color_scheme,
+                                          scaling=scaling_options[0], feature_name=feature_name)
+                return
+
+            # Multiple plots
+            plots = []
+            all_values = []
+
+            # Process each scaling option
+            for scaling in scaling_options:
+                # Prepare the data for this scaling
+                _map = list(map(list, zip(*var_map)))  # flip
+                np_map = np.empty((len(_map), len(_map[0])))
+
+                # Apply scaling
+                if scaling == 'sum':
+                    for idx_outer, sublist_outer in enumerate(_map):
+                        for idx_inner, sublist in enumerate(sublist_outer):
+                            try:
+                                np_map[idx_outer][idx_inner] = sum(sublist)
+                            except TypeError:
+                                np_map[idx_outer][idx_inner] = 0
+                elif scaling == 'mean':
+                    for idx_outer, sublist_outer in enumerate(_map):
+                        for idx_inner, sublist in enumerate(sublist_outer):
+                            try:
+                                np_map[idx_outer][idx_inner] = np.mean(sublist)
+                            except TypeError:
+                                np_map[idx_outer][idx_inner] = 0
+                elif scaling == 'max':
+                    for idx_outer, sublist_outer in enumerate(_map):
+                        for idx_inner, sublist in enumerate(sublist_outer):
+                            try:
+                                np_map[idx_outer][idx_inner] = max(sublist)
+                            except TypeError:
+                                np_map[idx_outer][idx_inner] = 0
+                elif scaling == 'min':
+                    for idx_outer, sublist_outer in enumerate(_map):
+                        for idx_inner, sublist in enumerate(sublist_outer):
+                            try:
+                                np_map[idx_outer][idx_inner] = min(sublist)
+                            except TypeError:
+                                np_map[idx_outer][idx_inner] = 0
+                elif scaling == 'median':
+                    for idx_outer, sublist_outer in enumerate(_map):
+                        for idx_inner, sublist in enumerate(sublist_outer):
+                            try:
+                                np_map[idx_outer][idx_inner] = np.median(
+                                    sublist)
+                            except TypeError:
+                                np_map[idx_outer][idx_inner] = 0
+                elif scaling == 'std':
+                    for idx_outer, sublist_outer in enumerate(_map):
+                        for idx_inner, sublist in enumerate(sublist_outer):
+                            try:
+                                np_map[idx_outer][idx_inner] = np.std(sublist)
+                            except TypeError:
+                                np_map[idx_outer][idx_inner] = 0
+
+                # Convert to DataFrame
+                df_map = pd.DataFrame(np_map, columns=range(
+                    1, len(np_map)+1), index=range(1, len(np_map)+1))
+                df_map = df_map.melt(
+                    var_name='x', value_name='value', ignore_index=False)
+                df_map = df_map.reset_index()
+                df_map = df_map.rename(columns={'index': 'y'})
+                df_map['scaling'] = scaling
+
+                plots.append(df_map)
+                all_values.extend(df_map['value'].tolist())
+
+            # Combine all dataframes
+            combined_df = pd.concat(plots, ignore_index=True)
+
+            # Calculate global min/max for shared colorbar
+            global_min = min(
+                [v for v in all_values if v > float('-inf')] or [0])
+            global_max = max(
+                [v for v in all_values if v < float('inf')] or [1])
+
+            # For log scale, handle zero/negative values
+            if color_type == "log":
+                if global_min <= 0:
+                    positive_values = [v for v in all_values if v > 0]
+                    if positive_values:
+                        global_min = min(positive_values)
+                    else:
+                        global_min = 0.01
+                        st.warning(
+                            "No positive values found for log scale. Using default minimum value.")
+
+            # Get grid size and create tick values
+            grid_size = len(_map)
+            x_domain = list(range(1, grid_size + 1))
+            y_domain = list(range(1, grid_size + 1))
+
+            if grid_size % 2 == 0:
+                tick_values = [1] + [i for i in range(2, grid_size + 1, 2)]
+            else:
+                tick_values = [i for i in range(1, grid_size + 1, 2)]
+
+            if grid_size not in tick_values:
+                tick_values.append(grid_size)
+            tick_values.sort()
+
+            # Calculate subplot width
+            total_width = 1200  # Total width for all plots (readable size)
+            # Account for spacing
+            plot_width = min(400, total_width // len(scaling_options) - 10)
+
+            if topology == 'rectangular':
+                # Create individual charts for rectangular topology
+                charts = []
+                for i, scaling in enumerate(scaling_options):
+                    scaling_data = combined_df[combined_df['scaling'] == scaling]
+
+                    # Only show legend on the rightmost plot
+                    show_legend = (i == len(scaling_options) - 1)
+
+                    chart = alt.Chart(scaling_data).mark_rect().encode(
+                        x=alt.X('x:O', title='',
+                                scale=alt.Scale(domain=x_domain, padding=0.5),
+                                axis=alt.Axis(
+                                    values=tick_values,
+                                    labelAngle=0,
+                                    tickOpacity=1,
+                                    domainOpacity=1,
+                                    labels=True,
+                                    labelOverlap=False
+                                )),
+                        y=alt.Y('y:O', title='',
+                                sort=alt.EncodingSortField(
+                                    'y', order='descending'),
+                                scale=alt.Scale(domain=y_domain, padding=0.5),
+                                axis=alt.Axis(
+                                    values=tick_values,
+                                    tickOpacity=1,
+                                    domainOpacity=1,
+                                    labels=True,
+                                    labelOverlap=False
+                                )),
+                        color=alt.Color(
+                            'value:Q',
+                            scale=alt.Scale(type=color_type, domain=(
+                                global_min, global_max), scheme=color_scheme),
+                            legend=alt.Legend(
+                                orient='bottom',
+                                direction='horizontal',
+                                gradientLength=min(plot_width, 200),
+                                gradientThickness=10,
+                                title=None
+                            ) if show_legend else None
+                        )
+                    ).properties(
+                        height=200,
+                        width=plot_width,
+                        title={
+                            "text": f"{scaling}",
+                            "anchor": "middle",
+                            "fontSize": 12,
+                            "fontWeight": "bold",
+                            "offset": 5
+                        }
+                    )
+                    charts.append(chart)
+
+                # Concatenate charts horizontally
+                final_chart = alt.hconcat(*charts, spacing=0).resolve_scale(
+                    color='shared'
+                ).properties(
+                    title={
+                        "text": f"{feature_name} - Feature Visualization",
+                        "anchor": "middle",
+                        "fontSize": 12,
+                        "fontWeight": "bold",
+                        "offset": 15
+                    }
+                ).configure_view(
+                    strokeWidth=0
+                )
+
+            else:
+                # Hexagonal topology
+                charts = []
+                height_f, width_f = 600, 650  # compensate the absence of number of neurons
+                total_width = width_f * len(scaling_options)
+                for i, scaling in enumerate(scaling_options):
+                    scaling_data = combined_df[combined_df['scaling'] == scaling]
+
+                    # Calculate hexagon properties
+                    max_x = scaling_data['x'].max()
+                    max_y = scaling_data['y'].max()
+                    min_x = scaling_data['x'].min()
+                    min_y = scaling_data['y'].min()
+
+                    size = 8
+                    hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
+
+                    # Only show legend on the rightmost plot
+                    show_legend = (i == 0)
+
+                    chart = alt.Chart(scaling_data).mark_point(shape=hexagon, size=size**2).encode(
+                        x=alt.X('xFeaturePos:Q', title='',
+                                scale=alt.Scale(domain=[0, grid_size + 1.5]),
+                                axis=alt.Axis(
+                                    grid=False,
+                                    values=tick_values,
+                                    tickOpacity=1,
+                                    domainOpacity=1,
+                                    labels=False,
+                                    labelOverlap=False
+                                )),
+                        y=alt.Y('y:Q',
+                                sort=alt.EncodingSortField(
+                                    'y', order='descending'),
+                                title='',
+                                scale=alt.Scale(domain=[0, grid_size + 1.5]),
+                                axis=alt.Axis(
+                                    grid=False,
+                                    labelPadding=20,
+                                    values=tick_values,
+                                    tickOpacity=1,
+                                    domainOpacity=1,
+                                    labels=False,
+                                    labelOverlap=False
+                                )),
+                        color=alt.Color('value:Q', scale=alt.Scale(
+                            scheme=color_scheme, type='pow')),
+                        fill=alt.Fill(
+                            'value:Q',
+                            scale=alt.Scale(type=color_type, domain=(
+                                global_min, global_max), scheme=color_scheme),
+                            legend=alt.Legend(
+                                orient='none',
+                                direction='horizontal',
+                                gradientLength=total_width-25,
+                                gradientThickness=25,
+                                legendX=0,
+                                legendY=height_f + 10,
+                                title=None,
+                                labelFontSize=28,
+                                tickCount=10
+                            ) if show_legend else None
+                        ),
+                        stroke=alt.value('black'),
+                        strokeWidth=alt.value(1.0)
+                    ).transform_calculate(
+                        xFeaturePos='(datum.y%2)/2 + datum.x-.5'
+                    ).properties(
+                        height=height_f,
+                        width=width_f,
+                        title={
+                            "text": f"{scaling}",
+                            "anchor": "middle",
+                            "fontSize": 28,
+                            "fontWeight": "bold",
+                            "offset": -5
+                        }
+                    )
+
+                    charts.append(chart)
+
+                # Concatenate charts horizontally
+                final_chart = alt.hconcat(*charts, spacing=0).resolve_scale(
+                    color='shared'
+                ).properties(
+                    title={
+                        "text": f"{feature_name}",
+                        "anchor": "middle",
+                        "fontSize": 36,
+                        "fontWeight": "bold",
+                        "offset": 10
+                    }
+                ).configure_view(
+                    strokeWidth=0
+                )
+
+            st.write('## SOM Feature Visualization')
+            st.altair_chart(final_chart, use_container_width=True,
+                            key=f'{feature_name}')
+
+        # Handle the plotting based on dataset choice
+        if st.session_state.feature_viz_dataset_choice == 'Use the main dataset':
+            feature = st.session_state.feature_viz_feature
+            scaling_options = st.session_state.feature_viz_scaling
+
+            var = project_feature(st.session_state.som, X,
+                                  st.session_state.raw_df[feature])
+
+            # Precompute all scaling metrics for global scale initialization
+
+            precompute_feature_scale_ranges(var, feature)
+
+            is_string_var = is_string(var)
+
+            if is_string_var:
+                st.write('## SOM Feature Visualization')
+                st.write(f"**Feature:** {feature}")
+                st.write(
+                    "**Note:** String features are displayed with the most common value per neuron.")
+
+                if st.session_state.som.topology == 'rectangular':
+                    category_plot_sources(var)
+                else:
+                    category_plot_sources_hex(var)
+            else:
+                create_multi_features_plot(
+                    var, scaling_options, type_option, color_scheme,
+                    feature, st.session_state.som.topology
+                )
+
+        elif (st.session_state.feature_viz_dataset_choice == 'Upload a new dataset' and
+              hasattr(st.session_state, 'feature_viz_uploaded_file') and
+              st.session_state.feature_viz_uploaded_file is not None):
+
+            uploaded_file = st.session_state.feature_viz_uploaded_file
+            scaling_options = st.session_state.feature_viz_scaling
+
+            try:
+                # Validate and load the dataset
+                dataset = validate_and_load_dataset(uploaded_file, features)
+
+                feature_to_trans_and_norm = [
+                    'powlaw_gamma', 'bb_kt', 'var_ratio_b', 'var_ratio_h', 'var_ratio_s']
+
+                dataset[feature_to_trans_and_norm] = transform_and_normalize(
+                    dataset[feature_to_trans_and_norm], st.session_state.df_to_norm)
+
+                # reorder the columns of the dataset to have the same order as listed in selected_features
+                # Ensure selected features are present in the uploaded dataset (case-insensitive match)
+                # and add the last column to the selected features (which is not in the selected_features)
+
+                # Get the selected features from session state
+                selected_features = st.session_state.selected_features
+
+                # Lowercase mapping for uploaded dataset columns and selected features
+                dataset_columns_lower = [col.lower()
+                                         for col in dataset.columns]
+                selected_features_lower = [f.lower()
+                                           for f in selected_features]
+
+                # Find the mapping from selected_features to dataset columns (case-insensitive)
+                feature_col_map = {}
+                for f in selected_features_lower:
+                    if f in dataset_columns_lower:
+                        idx = dataset_columns_lower.index(f)
+                        feature_col_map[f] = dataset.columns[idx]
+                    else:
+                        st.error(
+                            f"Feature '{f}' not found in uploaded dataset columns: {dataset.columns.tolist()}")
+                        raise ValueError(
+                            f"Feature '{f}' not found in uploaded dataset.")
+
+                # The last column (assumed to be the feature to visualize)
+                last_col = dataset.columns[-1]
+                # Reorder columns: selected features (in order), then the last column
+                reordered_cols = [feature_col_map[f]
+                                  for f in selected_features_lower] + [last_col]
+                dataset = dataset[reordered_cols]
+
+                # All rows, only the last column
+                Xx = dataset.iloc[:, :-1].to_numpy()
+                feature_data = dataset.iloc[:, -1]
+                # Get the name of the last column (the feature)
+                uploaded_feature_name = dataset.columns[-1]
+
+                if dataset is not None:
+                    st.session_state['new_dataset'] = dataset
+                    var = project_feature(
+                        st.session_state.som, Xx, feature_data)
+
+                    # Precompute all scaling metrics for global scale initialization
+                    precompute_feature_scale_ranges(var, uploaded_feature_name)
+
+                    is_string_var = is_string(var)
+
+                    if is_string_var:
+                        st.write('## SOM Feature Visualization')
+                        st.write(f"**Feature:** {uploaded_feature_name}")
+                        st.write(
+                            "**Note:** String features are displayed with the most common value per neuron.")
+
+                        if st.session_state.som.topology == 'rectangular':
+                            category_plot_sources(var)
+                        else:
+                            category_plot_sources_hex(var)
+                    else:
+                        create_multi_features_plot(
+                            var, scaling_options, type_option, color_scheme,
+                            uploaded_feature_name, st.session_state.som.topology
+                        )
+                else:
+                    st.error(
+                        "Dataset validation failed. Please check the column names and ensure there are no empty values.")
+            except Exception as e:
+                st.error(
+                    f"An error occurred: {e} at line {e.__traceback__.tb_lineno}")
 
     # Add a checkbox for enabling download options
     if st.session_state.som.topology == 'hexagonal':
@@ -1055,7 +1953,7 @@ if st.session_state.SOM_loaded:
                     'Choose the dataset', ['Use the main dataset', 'Upload a new dataset'])
                 if dataset_choice == 'Use the main dataset':
                     dataset_toclassify = st.session_state.df_index[pd.isna(
-                        st.session_state.raw_df['main_type'])]
+                        st.session_state.raw_df[simbad_type])]
                 elif dataset_choice == 'Upload a new dataset':
                     if st.session_state.SOM_loaded:
                         uploaded_file = st.file_uploader(
@@ -1074,8 +1972,8 @@ if st.session_state.SOM_loaded:
                                 st.error(f"An error occurred: {e}")
 
                 simbad_dataset = st.session_state.raw_df[pd.notna(
-                    st.session_state.raw_df['main_type'])]
-                SIMBAD_classes = set(st.session_state.raw_df['main_type'])
+                    st.session_state.raw_df[simbad_type])]
+                SIMBAD_classes = set(st.session_state.raw_df[simbad_type])
 
                 classify = st.form_submit_button('Get Classification')
 

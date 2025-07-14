@@ -188,7 +188,7 @@ def is_string(var):
     for sublist in var:
         for sublist2 in sublist:
             for value in sublist2:
-                if value is not None and not isinstance(value, str):
+                if value is not None and not isinstance(value, str) and not (isinstance(value, float) and np.isnan(value)):
                     is_string = False
                     return is_string
     return is_string
@@ -397,6 +397,61 @@ def get_hex_neighbors(i, j, max_i, max_j):
             neighbors.append((ni, nj))
 
     return neighbors
+
+
+def detect_cluster_boundaries(cluster_mapping, som_shape):
+    """
+    Detects which neurons are at the perimeter/boundary of clusters.
+    Only neurons at cluster boundaries will receive enhanced borders.
+
+    Parameters:
+    -----------
+    cluster_mapping : dict
+        Dictionary mapping (x, y) positions to cluster IDs
+    som_shape : tuple
+        Shape of the SOM grid (max_i, max_j)
+
+    Returns:
+    --------
+    dict
+        Dictionary mapping (x, y) positions to True if they are at cluster boundary
+    """
+    boundary_neurons = {}
+    max_i, max_j = som_shape
+
+    for (x, y), cluster_id in cluster_mapping.items():
+        # Check if this neuron is at the boundary by examining its neighbors
+        is_boundary = False
+
+        # Get all possible neighbors for this position
+        neighbors = get_hex_neighbors(x, y, max_i, max_j)
+
+        # Check neighbors that exist and have cluster assignments
+        for neighbor_pos in neighbors:
+            neighbor_cluster = cluster_mapping.get(neighbor_pos, None)
+
+            # If neighbor has different cluster ID, this is a boundary
+            if neighbor_cluster is not None and neighbor_cluster != cluster_id:
+                is_boundary = True
+                break
+
+        # Also check if this neuron is at the edge of the SOM grid
+        # But only mark as boundary if it's actually at the edge and has some cluster neighbors
+        is_at_edge = (x == 0 or x == max_i - 1 or y == 0 or y == max_j - 1)
+
+        # For neurons at the grid edge, only mark as boundary if they have fewer neighbors
+        # than expected (meaning they're truly at the perimeter)
+        if is_at_edge:
+            # For hexagonal grids, interior neurons have 6 neighbors
+            # Edge neurons will have fewer neighbors
+            expected_neighbors = 6
+            actual_neighbors = len(neighbors)
+            if actual_neighbors < expected_neighbors:
+                is_boundary = True
+
+        boundary_neurons[(x, y)] = is_boundary
+
+    return boundary_neurons
 
 
 def topographic_error_hex(som, data):
@@ -830,8 +885,7 @@ def scatter_plot_clustering_hex(som, X, GMM_cluster_labels, jitter_amount=0.5, s
             x=alt.X('xFeaturePos:Q', title='', scale=alt.Scale(domain=[min_x, max_x])).axis(
                 grid=False, tickOpacity=0, domainOpacity=0),
             y=alt.Y('y:Q', sort=alt.EncodingSortField(
-                'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])).axis(
-                grid=False, tickOpacity=0, domainOpacity=0),
+                'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])).axis(grid=False, tickOpacity=0, domainOpacity=0),
             stroke=alt.value('gray'),
             strokeWidth=alt.value(0.5),
             fill=alt.value('white')
@@ -1134,8 +1188,7 @@ def scatter_plot_sources_hex(som, sources, raw_df, X, column_name, custom_colors
             x=alt.X('xFeaturePos:Q', title='', scale=alt.Scale(domain=[min_x, max_x])).axis(
                 grid=False, tickOpacity=0, domainOpacity=0),
             y=alt.Y('y:Q', sort=alt.EncodingSortField(
-                'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])).axis(
-                grid=False, tickOpacity=0, domainOpacity=0),
+                'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])).axis(grid=False, tickOpacity=0, domainOpacity=0),
             stroke=alt.value('gray'),
             strokeWidth=alt.value(0.5),
             fill=alt.value('white')
@@ -1199,7 +1252,7 @@ def project_feature(som, X, feature, source=None):
     return map
 
 
-def category_plot_sources(_map, flip=True, custom_colors=None):
+def category_plot_sources(_map, flip=True, custom_colors=None, cluster_mapping=None, cluster_border_colors=None):
 
     if flip:
         _map = list(map(list, zip(*_map)))
@@ -1213,8 +1266,16 @@ def category_plot_sources(_map, flip=True, custom_colors=None):
     for idx_outer, sublist_outer in enumerate(_map):
         for idx_inner, sublist in enumerate(sublist_outer):
             # the most common element in the list is the category
+            # Exclude None and nan from sublist before finding the most common element
+            filtered_sublist = [v for v in sublist if v is not None and not (
+                isinstance(v, float) and np.isnan(v))]
+            if filtered_sublist:
+                most_common = max(set(filtered_sublist),
+                                  key=filtered_sublist.count)
+            else:
+                most_common = None
             winning_categories.append(
-                [int(idx_outer+1), int(idx_inner+1), max(set(sublist), key=sublist.count)])
+                [int(idx_outer+1), int(idx_inner+1), most_common])
 
     winning_categories = np.array(winning_categories)
 
@@ -1245,21 +1306,66 @@ def category_plot_sources(_map, flip=True, custom_colors=None):
         # Use default color scheme
         color_scale = alt.Scale(scheme='lightmulti')
 
-    scatter_chart_sample = alt.Chart(pd_winning_categories).mark_rect().encode(
+    # Create a base chart for the rectangles
+    base_chart = alt.Chart(pd_winning_categories).encode(
         x=alt.X('w_x:O', title='', scale=alt.Scale(domain=tick_x)),
         y=alt.Y('w_y:O', sort=alt.EncodingSortField(
-            'w_y', order='descending'), title='', scale=alt.Scale(domain=tick_y)),
-        color=alt.Color(
-            'source:N', scale=color_scale, legend=alt.Legend(orient='bottom'))
-    ).properties(
-        height=700,
-        width=600
+            'w_y', order='descending'), title='', scale=alt.Scale(domain=tick_y))
     )
+
+    # Create the main visualization with fill colors based on SIMBAD type
+    fill_chart = base_chart.mark_rect().encode(
+        color=alt.Color(
+            'source:N', scale=color_scale, legend=alt.Legend(orient='bottom')),
+        tooltip=['source:N', 'w_x:Q', 'w_y:Q']
+    )
+
+    # If cluster information is provided, add stroke color based on cluster assignment
+    if cluster_mapping is not None and cluster_border_colors is not None:
+        # Add cluster ID to each neuron if available
+        pd_winning_categories['cluster_id'] = pd_winning_categories.apply(
+            lambda row: cluster_mapping.get((row['w_x']-1, row['w_y']-1), -1),
+            axis=1
+        )
+
+        # Create a stroke color scale for clusters
+        cluster_domain = list(cluster_border_colors.keys())
+        cluster_range = list(cluster_border_colors.values())
+
+        # Create a separate chart with thicker stroke for the borders, colored by cluster
+        border_chart = base_chart.mark_rect(
+            strokeWidth=2  # Thicker border to make clusters more visible but not too thick
+        ).encode(
+            stroke=alt.condition(
+                alt.datum.cluster_id >= 0,  # Only add colored border if we have a cluster assignment
+                alt.Color('cluster_id:N',
+                          scale=alt.Scale(domain=cluster_domain,
+                                          range=cluster_range),
+                          legend=alt.Legend(title="Clusters", orient='bottom')),
+                # No border for neurons without cluster assignment
+                alt.value(None)
+            ),
+            tooltip=['source:N', 'w_x:Q', 'w_y:Q',
+                     alt.Tooltip('cluster_id:N', title='Cluster')]
+        )
+
+        # Layer the two charts
+        scatter_chart_sample = alt.layer(fill_chart, border_chart).properties(
+            height=700,
+            width=600
+        )
+    else:
+        # Use the original chart if no cluster information
+        scatter_chart_sample = fill_chart.properties(
+            height=700,
+            width=600
+        )
+
     st.write('## SOM category plot')
     st.altair_chart(scatter_chart_sample, use_container_width=True)
 
 
-def category_plot_sources_hex(_map, flip=True, custom_colors=None):
+def category_plot_sources_hex(_map, flip=True, custom_colors=None, cluster_mapping=None, enhanced_border_colors=None, standard_border_colors=None, cluster_stroke_width=4, enhanced_border_width=4, som_shape=None):
     if flip:
         _map = list(map(list, zip(*_map)))
     '''
@@ -1272,8 +1378,16 @@ def category_plot_sources_hex(_map, flip=True, custom_colors=None):
     for idx_outer, sublist_outer in enumerate(_map):
         for idx_inner, sublist in enumerate(sublist_outer):
             # the most common element in the list is the category
+            # Exclude None and nan from sublist before finding the most common element
+            filtered_sublist = [v for v in sublist if v is not None and not (
+                isinstance(v, float) and np.isnan(v))]
+            if filtered_sublist:
+                most_common = max(set(filtered_sublist),
+                                  key=filtered_sublist.count)
+            else:
+                most_common = None
             winning_categories.append(
-                [int(idx_outer+1), int(idx_inner+1), max(set(sublist), key=sublist.count)])
+                [int(idx_outer+1), int(idx_inner+1), most_common])
 
     winning_categories = np.array(winning_categories)
 
@@ -1314,32 +1428,176 @@ def category_plot_sources_hex(_map, flip=True, custom_colors=None):
         # Use default color scheme
         color_scale = alt.Scale(scheme='lightmulti')
 
-    hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
-    c = alt.Chart(pd_winning_categories).mark_point(shape=hexagon, size=size**2).encode(
-        x=alt.X('xFeaturePos:Q', title='', scale=alt.Scale(domain=[min_x-1, max_x+1])).axis(
-            grid=False, tickOpacity=0, domainOpacity=0),
-        y=alt.Y('y:Q', sort=alt.EncodingSortField(
-            'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])
-        ).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
-        color=alt.Color(
-            'source:N', scale=color_scale),
-        fill=alt.Color('source:N', scale=color_scale).legend(orient='bottom'),
-        stroke=alt.value('black'),
-        strokeWidth=alt.value(1.0)
-    ).transform_calculate(
-        # This field is required for the hexagonal X-Offset
-        xFeaturePos='(datum.y%2)/2 + datum.x-.5'
-    ).properties(
-        # width should be the same as the height
-        height=700,
-        width=600,
-    ).configure_view(
-        strokeWidth=0
-    ).configure_legend(
-        symbolStrokeWidth=1.0,  # Adjust the stroke width of legend symbols
-        # Adjust the size of legend symbols (default is 100)
-        symbolSize=size**2
-    )
+    # If cluster information is provided, add cluster ID to each neuron
+    if cluster_mapping is not None and enhanced_border_colors is not None and som_shape is not None:
+        # Add cluster ID to each neuron if available
+        pd_winning_categories['cluster_id'] = pd_winning_categories.apply(
+            lambda row: cluster_mapping.get((row['x']-1, row['y']-1), -1),
+            axis=1
+        )
+
+        # Detect cluster boundaries
+        boundary_neurons = detect_cluster_boundaries(
+            cluster_mapping, som_shape)
+
+        # Add boundary flag to dataframe
+        pd_winning_categories['is_boundary'] = pd_winning_categories.apply(
+            lambda row: boundary_neurons.get((row['x']-1, row['y']-1), False),
+            axis=1
+        )
+
+        # Create stroke color scales for enhanced borders
+        enhanced_domain = list(enhanced_border_colors.keys())
+        enhanced_range = list(enhanced_border_colors.values())
+
+        # Get default standard border color (black) from the standard_border_colors dict
+        default_standard_color = '#000000'
+        if standard_border_colors and len(standard_border_colors) > 0:
+            default_standard_color = list(standard_border_colors.values())[0]
+
+        # Create a base encoding for both charts
+        base_encoding = {
+            'x': alt.X('xFeaturePos:Q', title='', scale=alt.Scale(domain=[min_x-1, max_x+1])).axis(
+                grid=False, tickOpacity=0, domainOpacity=0),
+            'y': alt.Y('y:Q', sort=alt.EncodingSortField(
+                'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])
+            ).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0)
+        }
+
+        hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
+
+        # Create the fill chart for SIMBAD types with standard borders
+        if standard_border_colors and len(standard_border_colors) > 1:
+            # Use conditional coloring for standard borders when customization is enabled
+            standard_domain = list(standard_border_colors.keys())
+            standard_range = list(standard_border_colors.values())
+
+            fill_chart = alt.Chart(pd_winning_categories).mark_point(
+                shape=hexagon,
+                size=size**2,
+                strokeWidth=1.0  # Always use standard width for fill chart
+            ).encode(
+                **base_encoding,
+                color=alt.Color('source:N', scale=color_scale),
+                fill=alt.Color('source:N', scale=color_scale).legend(
+                    orient='bottom'),
+                stroke=alt.condition(
+                    alt.datum.cluster_id >= 0,  # Only apply cluster color if cluster_id is valid
+                    alt.Color('cluster_id:N',
+                              scale=alt.Scale(domain=standard_domain,
+                                              range=standard_range),
+                              legend=None),  # No legend for fill chart borders
+                    # Fallback to default for non-clustered neurons
+                    alt.value(default_standard_color)
+                ),
+                tooltip=['source:N', 'x:Q', 'y:Q', alt.Tooltip(
+                    'cluster_id:N', title='Cluster'), alt.Tooltip(
+                    'is_boundary:N', title='Boundary')]
+            ).transform_calculate(
+                # This field is required for the hexagonal X-Offset
+                xFeaturePos='(datum.y%2)/2 + datum.x-.5'
+            )
+        else:
+            # Use single color for all standard borders when not customizing
+            fill_chart = alt.Chart(pd_winning_categories).mark_point(
+                shape=hexagon,
+                size=size**2,
+                strokeWidth=1.0  # Always use standard width for fill chart
+            ).encode(
+                **base_encoding,
+                color=alt.Color('source:N', scale=color_scale),
+                fill=alt.Color('source:N', scale=color_scale).legend(
+                    orient='bottom'),
+                stroke=alt.value(default_standard_color),
+                tooltip=['source:N', 'x:Q', 'y:Q', alt.Tooltip(
+                    'cluster_id:N', title='Cluster'), alt.Tooltip(
+                    'is_boundary:N', title='Boundary')]
+            ).transform_calculate(
+                # This field is required for the hexagonal X-Offset
+                xFeaturePos='(datum.y%2)/2 + datum.x-.5'
+            )
+
+        # Create enhanced borders only for boundary neurons using conditional encoding
+        enhanced_border_chart = alt.Chart(pd_winning_categories).mark_point(
+            shape=hexagon,
+            size=(size-(enhanced_border_width-1))**2,
+            filled=False,  # Only show the border
+            strokeWidth=enhanced_border_width
+        ).encode(
+            **base_encoding,
+            stroke=alt.condition(
+                # Only boundary neurons with valid cluster assignment
+                (alt.datum.cluster_id >= 0) & (alt.datum.is_boundary == True),
+                alt.Color('cluster_id:N',
+                          scale=alt.Scale(domain=enhanced_domain,
+                                          range=enhanced_range),
+                          legend=alt.Legend(title="clusters", orient='bottom')),
+                alt.value(None)  # No enhanced border for non-boundary neurons
+            ),
+            # Explicitly set no fill for enhanced borders
+            fill=alt.value(None),
+            opacity=alt.condition(
+                # Only show enhanced borders for boundary neurons
+                (alt.datum.cluster_id >= 0) & (alt.datum.is_boundary == True),
+                alt.value(1.0),
+                alt.value(0.0)  # Hide non-boundary neurons in enhanced chart
+            ),
+            tooltip=['source:N', 'x:Q', 'y:Q', alt.Tooltip(
+                'cluster_id:N', title='Cluster'), alt.Tooltip(
+                'is_boundary:N', title='Boundary')]
+        ).transform_calculate(
+            # This field is required for the hexagonal X-Offset
+            xFeaturePos='(datum.y%2)/2 + datum.x-.5'
+        )
+
+        # Standard border colors are now handled in the fill_chart above
+
+        # Layer the charts: fill first, then enhanced borders
+        # Important: enhanced borders must be layered on top to be visible
+        c = alt.layer(fill_chart, enhanced_border_chart).resolve_scale(
+            stroke='independent').properties(
+            # width should be the same as the height
+            height=700,
+            width=600,
+        ).configure_view(
+            strokeWidth=0
+        ).configure_legend(
+            symbolStrokeWidth=1.0,  # Adjust the stroke width of legend symbols
+            # Adjust the size of legend symbols (default is 100)
+            symbolSize=size**2
+        )
+    else:
+        # Use the original chart if no cluster information
+        hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
+        c = alt.Chart(pd_winning_categories).mark_point(shape=hexagon, size=size**2).encode(
+            x=alt.X('xFeaturePos:Q', title='', scale=alt.Scale(domain=[min_x-1, max_x+1])).axis(
+                grid=False, tickOpacity=0, domainOpacity=0),
+            y=alt.Y('y:Q', sort=alt.EncodingSortField(
+                'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])
+            ).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
+            color=alt.Color(
+                'source:N', scale=color_scale),
+            fill=alt.Color('source:N', scale=color_scale).legend(
+                orient='bottom'),
+            stroke=alt.value('#000000'),  # Default black border
+            # Default stroke width for non-cluster mode
+            strokeWidth=alt.value(1.0),
+            tooltip=['source:N', 'x:Q', 'y:Q']
+        ).transform_calculate(
+            # This field is required for the hexagonal X-Offset
+            xFeaturePos='(datum.y%2)/2 + datum.x-.5'
+        ).properties(
+            # width should be the same as the height
+            height=700,
+            width=600,
+        ).configure_view(
+            strokeWidth=0
+        ).configure_legend(
+            symbolStrokeWidth=1.0,  # Adjust the stroke width of legend symbols
+            # Adjust the size of legend symbols (default is 100)
+            symbolSize=size**2
+        )
+
     st.write('## SOM category plot')
     st.altair_chart(c, use_container_width=True)
 
@@ -2128,12 +2386,39 @@ def validate_and_load_dataset_class(uploaded_file, expected_columns):
 
 def transform_and_normalize(dataset_toclassify, df_to_norm):
     # Check for each column if it exists in df_to_norm and transform it
-    for col in dataset_toclassify.columns:
-        if col in df_to_norm.columns:
-            # Adjust column name
-            normalized_col = col.replace('_to_log_norm', '')
-            dataset_toclassify[normalized_col] = np.log10(
-                dataset_toclassify[col])
+    # For each column in df_to_norm, check if the corresponding column (without '_to_log_norm') exists in dataset_toclassify.
+    # If so, apply log10 to that column in dataset_toclassify and overwrite it.
+
+    # Rename columns to add '_to_log_norm' suffix if not already present
+    dataset_toclassify.columns = [
+        col if col.endswith('_to_log_norm') else f"{col}_to_log_norm"
+        for col in dataset_toclassify.columns
+    ]
+
+    for col in df_to_norm.columns:
+        if col in dataset_toclassify.columns:
+
+            dataset_toclassify[col] = dataset_toclassify[col].replace(
+                0, dataset_toclassify[col][dataset_toclassify[col] > 0].min()/10)
+
+            combined = pd.concat([
+                df_to_norm[[col]].reset_index(drop=True),
+                dataset_toclassify[[col]].reset_index(drop=True)
+            ], ignore_index=True)
+
+            if col != "powlaw_gamma_to_log_norm":
+                combined[col] = np.log(
+                    combined[col])
+
+            # Concatenate the column from dataset_toclassify to df_to_norm for normalization
+            scalar = MinMaxScaler()
+            scaled = scalar.fit_transform(
+                combined.values.reshape(-1, 1)).flatten()
+            # Only take the normalized values corresponding to dataset_toclassify (at the end)
+            dataset_toclassify[col] = scaled[-len(dataset_toclassify):]
+
+    dataset_toclassify.columns = dataset_toclassify.columns.str.replace(
+        '_to_log_norm', '')
 
     return dataset_toclassify
 
@@ -2404,3 +2689,291 @@ def plot_empty_hexagons(som, X=None, raw_df=None, main_types=None):
 
     st.altair_chart(c, use_container_width=True)
     # Remove the duplicate chart displays
+
+
+def category_plot_sources_hex_with_patterns(_map, flip=True, custom_colors=None, cluster_mapping=None, cluster_border_colors=None):
+    """
+    Alternative hexagonal category plot with pattern-based cluster visualization.
+    Uses opacity and stroke-dash patterns to distinguish clusters.
+    """
+    if flip:
+        _map = list(map(list, zip(*_map)))
+
+    # Convert map to winning categories (same as original function)
+    winning_categories = []
+    for idx_outer, sublist_outer in enumerate(_map):
+        for idx_inner, sublist in enumerate(sublist_outer):
+            winning_categories.append(
+                [int(idx_outer+1), int(idx_inner+1), max(set(sublist), key=sublist.count)])
+
+    winning_categories = np.array(winning_categories)
+    pd_winning_categories = pd.DataFrame(
+        winning_categories, columns=['y', 'x', 'source'])
+
+    min_x = pd_winning_categories['x'].min()
+    max_x = pd_winning_categories['x'].max()
+    min_y = pd_winning_categories['y'].min()
+    max_y = pd_winning_categories['y'].max()
+
+    pd_winning_categories = pd_winning_categories.dropna()
+    pd_winning_categories['x'] = pd_winning_categories['x'].astype(float)
+    pd_winning_categories['y'] = pd_winning_categories['y'].astype(float)
+    pd_winning_categories = pd_winning_categories.sort_values(by=['x', 'y'])
+    pd_winning_categories = pd_winning_categories.reset_index(drop=True)
+
+    index = np.where(new_dimensions == len(_map))[0][0]
+    size = new_sizes[index]
+
+    # Prepare color scale
+    if custom_colors:
+        domain = list(custom_colors.keys())
+        range_ = list(custom_colors.values())
+        color_scale = alt.Scale(domain=domain, range=range_)
+    else:
+        color_scale = alt.Scale(scheme='lightmulti')
+
+    hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
+
+    if cluster_mapping is not None and cluster_border_colors is not None:
+        # Add cluster ID
+        pd_winning_categories['cluster_id'] = pd_winning_categories.apply(
+            lambda row: cluster_mapping.get((row['x']-1, row['y']-1), -1),
+            axis=1
+        )
+
+        # Create different opacity levels for each cluster
+        cluster_ids = sorted(
+            [id for id in cluster_mapping.values() if id >= 0])
+        opacity_levels = [0.3 + (i * 0.7 / len(cluster_ids))
+                          for i in range(len(cluster_ids))]
+
+        base_encoding = {
+            'x': alt.X('xFeaturePos:Q', title='', scale=alt.Scale(domain=[min_x-1, max_x+1])).axis(
+                grid=False, tickOpacity=0, domainOpacity=0),
+            'y': alt.Y('y:Q', sort=alt.EncodingSortField(
+                'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])
+            ).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0)
+        }
+
+        # Main fill chart
+        fill_chart = alt.Chart(pd_winning_categories).mark_point(
+            shape=hexagon,
+            size=size**2
+        ).encode(
+            **base_encoding,
+            color=alt.Color('source:N', scale=color_scale),
+            fill=alt.Color('source:N', scale=color_scale).legend(
+                orient='bottom'),
+            stroke=alt.value('black'),
+            strokeWidth=alt.value(1.0),
+            tooltip=['source:N', 'x:Q', 'y:Q', alt.Tooltip(
+                'cluster_id:N', title='Cluster')]
+        )
+
+        # Cluster highlight overlay with varying opacity
+        cluster_overlay = alt.Chart(pd_winning_categories).mark_point(
+            shape=hexagon,
+            size=size**2,
+            filled=False
+        ).encode(
+            **base_encoding,
+            stroke=alt.condition(
+                alt.datum.cluster_id >= 0,
+                alt.Color('cluster_id:N',
+                          scale=alt.Scale(domain=list(cluster_border_colors.keys()),
+                                          range=list(cluster_border_colors.values())),
+                          legend=alt.Legend(title="Clusters", orient='bottom')),
+                alt.value(None)
+            ),
+            strokeWidth=alt.condition(
+                alt.datum.cluster_id >= 0,
+                alt.value(8),  # Extra thick border for cluster distinction
+                alt.value(0)
+            ),
+            strokeDash=alt.condition(
+                alt.datum.cluster_id >= 0,
+                alt.value([5, 5]),  # Dashed line pattern
+                alt.value([])
+            )
+        )
+
+        c = alt.layer(fill_chart, cluster_overlay).transform_calculate(
+            xFeaturePos='(datum.y%2)/2 + datum.x-.5'
+        ).properties(
+            height=700,
+            width=600,
+        ).configure_view(
+            strokeWidth=0
+        ).configure_legend(
+            symbolStrokeWidth=1.0,
+            symbolSize=size**2
+        )
+    else:
+        # Original chart without clustering
+        c = alt.Chart(pd_winning_categories).mark_point(shape=hexagon, size=size**2).encode(
+            x=alt.X('xFeaturePos:Q', title='', scale=alt.Scale(domain=[min_x-1, max_x+1])).axis(
+                grid=False, tickOpacity=0, domainOpacity=0),
+            y=alt.Y('y:Q', sort=alt.EncodingSortField(
+                'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])
+            ).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
+            color=alt.Color('source:N', scale=color_scale),
+            fill=alt.Color('source:N', scale=color_scale).legend(
+                orient='bottom'),
+            stroke=alt.value('black'),
+            # Default stroke width for non-cluster mode
+            strokeWidth=alt.value(1.0),
+            tooltip=['source:N', 'x:Q', 'y:Q']
+        ).transform_calculate(
+            xFeaturePos='(datum.y%2)/2 + datum.x-.5'
+        ).properties(
+            height=700,
+            width=600,
+        ).configure_view(
+            strokeWidth=0
+        ).configure_legend(
+            symbolStrokeWidth=1.0,
+            symbolSize=size**2
+        )
+
+    st.write('## SOM category plot (Pattern-based Clusters)')
+    st.altair_chart(c, use_container_width=True)
+
+
+def category_plot_sources_hex_with_size_variation(_map, flip=True, custom_colors=None, cluster_mapping=None, cluster_border_colors=None):
+    """
+    Alternative hexagonal category plot with size-based cluster visualization.
+    Uses different hexagon sizes to distinguish clusters.
+    """
+    if flip:
+        _map = list(map(list, zip(*_map)))
+
+    # Convert map to winning categories (same as original function)
+    winning_categories = []
+    for idx_outer, sublist_outer in enumerate(_map):
+        for idx_inner, sublist in enumerate(sublist_outer):
+            winning_categories.append(
+                [int(idx_outer+1), int(idx_inner+1), max(set(sublist), key=sublist.count)])
+
+    winning_categories = np.array(winning_categories)
+    pd_winning_categories = pd.DataFrame(
+        winning_categories, columns=['y', 'x', 'source'])
+
+    min_x = pd_winning_categories['x'].min()
+    max_x = pd_winning_categories['x'].max()
+    min_y = pd_winning_categories['y'].min()
+    max_y = pd_winning_categories['y'].max()
+
+    pd_winning_categories = pd_winning_categories.dropna()
+    pd_winning_categories['x'] = pd_winning_categories['x'].astype(float)
+    pd_winning_categories['y'] = pd_winning_categories['y'].astype(float)
+    pd_winning_categories = pd_winning_categories.sort_values(by=['x', 'y'])
+    pd_winning_categories = pd_winning_categories.reset_index(drop=True)
+
+    index = np.where(new_dimensions == len(_map))[0][0]
+    base_size = new_sizes[index]
+
+    # Prepare color scale
+    if custom_colors:
+        domain = list(custom_colors.keys())
+        range_ = list(custom_colors.values())
+        color_scale = alt.Scale(domain=domain, range=range_)
+    else:
+        color_scale = alt.Scale(scheme='lightmulti')
+
+    hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
+
+    if cluster_mapping is not None and cluster_border_colors is not None:
+        # Add cluster ID
+        pd_winning_categories['cluster_id'] = pd_winning_categories.apply(
+            lambda row: cluster_mapping.get((row['x']-1, row['y']-1), -1),
+            axis=1
+        )
+
+        # Create different sizes for each cluster
+        cluster_ids = sorted(
+            [id for id in cluster_mapping.values() if id >= 0])
+        size_multipliers = [0.7 + (i * 0.6 / len(cluster_ids))
+                            for i in range(len(cluster_ids))]
+
+        # Add size column based on cluster
+        def get_size_for_cluster(cluster_id):
+            if cluster_id >= 0 and cluster_id < len(size_multipliers):
+                return base_size**2 * size_multipliers[cluster_id]
+            return base_size**2
+
+        pd_winning_categories['hex_size'] = pd_winning_categories['cluster_id'].apply(
+            get_size_for_cluster)
+
+        base_encoding = {
+            'x': alt.X('xFeaturePos:Q', title='', scale=alt.Scale(domain=[min_x-1, max_x+1])).axis(
+                grid=False, tickOpacity=0, domainOpacity=0),
+            'y': alt.Y('y:Q', sort=alt.EncodingSortField(
+                'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])
+            ).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0)
+        }
+
+        # Main chart with varying sizes
+        c = alt.Chart(pd_winning_categories).mark_point(
+            shape=hexagon
+        ).encode(
+            **base_encoding,
+            size=alt.Size('hex_size:Q', scale=alt.Scale(
+                range=[base_size**2 * 0.7, base_size**2 * 1.3]), legend=None),
+            color=alt.Color('source:N', scale=color_scale),
+            fill=alt.Color('source:N', scale=color_scale).legend(
+                orient='bottom'),
+            stroke=alt.condition(
+                alt.datum.cluster_id >= 0,
+                alt.Color('cluster_id:N',
+                          scale=alt.Scale(domain=list(cluster_border_colors.keys()),
+                                          range=list(cluster_border_colors.values())),
+                          legend=alt.Legend(title="Clusters", orient='bottom')),
+                alt.value('black')
+            ),
+            strokeWidth=alt.condition(
+                alt.datum.cluster_id >= 0,
+                alt.value(3),
+                alt.value(1)
+            ),
+            tooltip=['source:N', 'x:Q', 'y:Q', alt.Tooltip(
+                'cluster_id:N', title='Cluster')]
+        ).transform_calculate(
+            xFeaturePos='(datum.y%2)/2 + datum.x-.5'
+        ).properties(
+            height=700,
+            width=600,
+        ).configure_view(
+            strokeWidth=0
+        ).configure_legend(
+            symbolStrokeWidth=1.0,
+            symbolSize=base_size**2
+        )
+    else:
+        # Original chart without clustering
+        c = alt.Chart(pd_winning_categories).mark_point(shape=hexagon, size=base_size**2).encode(
+            x=alt.X('xFeaturePos:Q', title='', scale=alt.Scale(domain=[min_x-1, max_x+1])).axis(
+                grid=False, tickOpacity=0, domainOpacity=0),
+            y=alt.Y('y:Q', sort=alt.EncodingSortField(
+                'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])
+            ).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
+            color=alt.Color('source:N', scale=color_scale),
+            fill=alt.Color('source:N', scale=color_scale).legend(
+                orient='bottom'),
+            stroke=alt.value('black'),
+            # Default stroke width for non-cluster mode
+            strokeWidth=alt.value(1.0),
+            tooltip=['source:N', 'x:Q', 'y:Q']
+        ).transform_calculate(
+            xFeaturePos='(datum.y%2)/2 + datum.x-.5'
+        ).properties(
+            height=700,
+            width=600,
+        ).configure_view(
+            strokeWidth=0
+        ).configure_legend(
+            symbolStrokeWidth=1.0,
+            symbolSize=base_size**2
+        )
+
+    st.write('## SOM category plot (Size-based Clusters)')
+    st.altair_chart(c, use_container_width=True)
