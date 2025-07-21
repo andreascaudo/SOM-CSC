@@ -404,7 +404,7 @@ if st.session_state.SOM_loaded:
         plot_submit = st.form_submit_button('Show plot')
 
         if plot_submit:
-            if plot_type in ['U-Matrix', 'Activation Response', 'Training Feature Space Map', 'Feature Visualization']:
+            if plot_type in ['U-Matrix', 'Activation Response', 'Training Feature Space Map', 'Source Name Visualization', 'Feature Visualization']:
                 color_scheme = st.selectbox(
                     'Color scheme', color_schemes, 0)
                 log_option = st.checkbox(
@@ -472,25 +472,79 @@ if st.session_state.SOM_loaded:
                 elif st.session_state.som.topology == 'hexagonal':
                     vis_type_string = 'Hexbin'
 
-                with st.expander("See explanation"):
+                dataset_choice = st.radio(
+                    'Choose the dataset', ['Use the main dataset', 'Upload a new dataset'])
+                if dataset_choice == 'Use the main dataset':
+
+                    with st.expander("See explanation"):
+                        st.write(
+                            '##### This visualization tool enables the user to apply color coding to the pre-trained SOM according to the names of data sources.')
+                        st.write(
+                            '##### The user can select one or more sources to visualize the distribution of sources across the map.')
+                        st.write(
+                            '##### The user can choose between two visualization types: Scatter and ' + vis_type_string + '.')
+                        st.write(
+                            '***Scatter visualization:*** The color assigned to each point on the map will signify the source name of its corresponding detection.')
+                        st.write('***' +
+                                 vis_type_string + ' visualization:*** The color of each neuron will indicate the source name that appears most frequently within that neuron.')
+                    # Category plot
+                    name_counts = st.session_state.raw_df['name'].value_counts(
+                    )
+                    sorted_names = [f"{name} [{count}]" for name,
+                                    count in name_counts.items()]
+                    sources = st.multiselect(
+                        'Select sources name [number of detections]', sorted_names)
+
+                    feature_name = st.selectbox(
+                        'Feature (optional)',
+                        [None] + st.session_state.raw_df.columns.to_list(),
+                        index=0
+                    )
+
+                    sources = [source.split(' [')[0] for source in sources]
                     st.write(
-                        '##### This visualization tool enables the user to apply color coding to the pre-trained SOM according to the names of data sources.')
-                    st.write(
-                        '##### The user can select one or more sources to visualize the distribution of sources across the map.')
-                    st.write(
-                        '##### The user can choose between two visualization types: Scatter and ' + vis_type_string + '.')
-                    st.write(
-                        '***Scatter visualization:*** The color assigned to each point on the map will signify the source name of its corresponding detection.')
-                    st.write('***' +
-                             vis_type_string + ' visualization:*** The color of each neuron will indicate the source name that appears most frequently within that neuron.')
-                # Category plot
-                name_counts = st.session_state.raw_df['name'].value_counts()
-                sorted_names = [f"{name} [{count}]" for name,
-                                count in name_counts.items()]
-                sources = st.multiselect(
-                    'Select sources name [number of detections]', sorted_names)
+                        "###### To update the map with the name of the selected sources, please click the 'Show Plot' button again.")
+                elif dataset_choice == 'Upload a new dataset':
+                    with st.expander("See explanation"):
+                        st.write(
+                            '⚠️ **The uploaded file must to be a .csv file with a specific structure:** ⚠️')
+                        st.write(
+                            'The initial columns should contain the features names. The second column should represent the feature intended for coloring the map. For example, if the SOM was trained with features A, B, and C, and you wish to color the map using feature D, the CSV file should be organized as follows:')
+                        st.write(
+                            '**Source name, feature to project**')
+                        st.write(
+                            '*2CXO J004238.6+411603, 1*')
+                        st.write(
+                            '*2CXO J004231.1+411621, 2*')
+                        st.write(
+                            '*...*')
+                        st.write(
+                            '*2CXO J010337.5-720133, n*')
+                        st.write('---')
+                    if st.session_state.SOM_loaded:
+                        uploaded_file = st.file_uploader(
+                            "Upload your CSV file", type="csv")
+                        st.write(
+                            "###### Please click the 'Show Plot' in order to refresh the view.")
+
+                        # Store selections for plotting outside the form
+                        st.session_state.feature_viz_uploaded_file = uploaded_file
+                        if uploaded_file is not None:
+                            source_name_df = pd.read_csv(
+                                uploaded_file, header=None)
+                            # first column is the source name, second column is the feature to project
+                            sources = source_name_df.iloc[:, 0].tolist()
+                            feature_values = source_name_df.iloc[:, 1].tolist()
+                            # create a dict with the source name as key and the feature as value
+                            source_feature_dict = dict(
+                                zip(sources, feature_values))
+                            feature_name = None
+                        else:
+                            sources = []
+                            feature_values = None
+
                 visualization_type = st.radio(
-                    'Visualization type', ['Scatter', vis_type_string])
+                    'Visualization type', [vis_type_string, 'Scatter'])
 
                 # Add visualization controls when Scatter is selected
                 jitter_amount = 0.5
@@ -508,59 +562,129 @@ if st.session_state.SOM_loaded:
 
                 # Add color customization option
                 customize_colors = st.checkbox(
-                    'Customize colors for sources', key='customize_colors_source_name')
+                    'Customize colors for sources', key='customize_colors_source_name', help='Select this option to customize the colors of the feature. Only works with categorical features. For numerical features, use the color scheme option.')
 
-                if customize_colors and len(sources) > 0:
+                def init_custom_colors(feature):
+                    # clear the custom colors
+                    st.session_state.custom_colors = {}
+                    st.session_state.initialized_colors = set()
+
                     with st.expander("Color Customization"):
                         st.write("Select custom colors for each source:")
-                        clean_sources = [source.split(
-                            ' [')[0] for source in sources]
 
                         # Create columns to save space
-                        cols = st.columns(min(3, len(clean_sources)))
+                        cols = st.columns(min(3, len(feature)))
 
-                        for i, source in enumerate(clean_sources):
+                        for i, f in enumerate(feature):
                             col_idx = i % len(cols)
                             with cols[col_idx]:
                                 # Use existing color if already set or a varied default color
-                                if source not in st.session_state.initialized_colors:
+                                if f not in st.session_state.initialized_colors:
                                     # Assign a default color from our variety of colors
-                                    st.session_state.custom_colors[source] = get_default_color(
+                                    st.session_state.custom_colors[f] = get_default_color(
                                         i)
                                     st.session_state.initialized_colors.add(
-                                        source)
+                                        f)
 
                                 selected_color = st.color_picker(
-                                    f"{source}", st.session_state.custom_colors[source], key=f"color_{source}")
-                                st.session_state.custom_colors[source] = selected_color
+                                    f"{f}", st.session_state.custom_colors[f], key=f"color_{f}")
+                                st.session_state.custom_colors[f] = selected_color
 
-                st.write(
-                    "###### To update the map with the name of the selected sources, please click the 'Show Plot' button again.")
                 if len(sources) > 0:
-                    sources = [source.split(' [')[0] for source in sources]
-                    source_colors = {src: st.session_state.custom_colors.get(
-                        src, None) for src in sources} if customize_colors else None
+                    if feature_name is not None or dataset_choice == 'Upload a new dataset':
+                        if dataset_choice == 'Use the main dataset':
+                            # Only include feature values that are present in at least one row where 'name' is in sources
+                            feature_values_in_sources = st.session_state.raw_df.loc[
+                                st.session_state.raw_df['name'].isin(
+                                    sources), feature_name
+                            ].unique()
 
-                    if st.session_state.som.topology == 'rectangular':
-                        if visualization_type == 'Scatter':
-                            scatter_plot_sources(
-                                st.session_state.som, sources, st.session_state.raw_df, X, 'name',
-                                custom_colors=source_colors, jitter_amount=jitter_amount, show_grid=show_grid)
-                        elif visualization_type == 'Rectangular':
-                            category_map = project_feature(
-                                st.session_state.som, X, st.session_state.raw_df['name'], sources)
-                            category_plot_sources(
-                                category_map, custom_colors=source_colors)
-                    elif st.session_state.som.topology == 'hexagonal':
-                        if visualization_type == 'Scatter':
-                            scatter_plot_sources_hex(
-                                st.session_state.som, sources, st.session_state.raw_df, X, 'name',
-                                custom_colors=source_colors, jitter_amount=jitter_amount, show_grid=show_grid)
-                        elif visualization_type == 'Hexbin':
-                            category_map = project_feature(
-                                st.session_state.som, X, st.session_state.raw_df['name'], sources)
-                            category_plot_sources_hex(
-                                category_map, custom_colors=source_colors)
+                            if customize_colors and len(feature_values_in_sources) > 0 and is_string(feature_values_in_sources):
+                                init_custom_colors(feature_values_in_sources)
+                            source_colors = {fn: st.session_state.custom_colors.get(
+                                fn, None) for fn in feature_values_in_sources} if customize_colors else None
+                            var = project_feature(st.session_state.som, X,
+                                                  st.session_state.raw_df[feature_name], filter_by=st.session_state.raw_df['name'], valid_values=sources)
+                            # Precompute all scaling metrics for global scale initializatio
+                            precompute_feature_scale_ranges(var, feature_name)
+                        else:
+                            if customize_colors and len(source_feature_dict.values()) > 0 and is_string(source_feature_dict.values()):
+                                init_custom_colors(
+                                    source_feature_dict.values())
+                            source_colors = {fn: st.session_state.custom_colors.get(
+                                fn, None) for fn in source_feature_dict.values()} if customize_colors else None
+
+                            features_train = st.session_state.df.columns.tolist()
+                            for i in range(len(features_train)):
+                                if features_train[i] in ['bb_kt', 'powlaw_gamma', 'var_ratio_b', 'var_ratio_h', 'var_ratio_s']:
+                                    # append "_log_norm"
+                                    features_train[i] = features_train[i] + \
+                                        "_log_norm"
+                            var = project_external_feature(st.session_state.som, st.session_state.raw_df[[
+                                'name'] + features_train].to_numpy(),
+                                source_feature_dict)
+
+                        is_string_var = is_string(var)
+
+                        if is_string_var:
+                            st.write('## SOM Feature Visualization')
+                            st.write(f"**Feature:** {feature_name}")
+                            st.write(
+                                "**Note:** String features are displayed with the most common value per neuron.")
+
+                        if topology == 'rectangular':
+                            if is_string(var):
+                                category_plot_sources(var)
+                            else:
+                                features_plot(var, type_option, color_scheme,
+                                              scaling='mean', feature_name=feature_name)
+                        else:
+                            if is_string(var):
+                                if visualization_type == 'Scatter':
+                                    category_plot_sources_scatter(var,
+                                                                  show_grid=show_grid,
+                                                                  jitter_amount=jitter_amount, custom_colors=source_colors, category='N')
+                                else:
+                                    category_plot_sources_hex(
+                                        var, custom_colors=source_colors)
+                            else:
+                                if visualization_type == 'Scatter':
+                                    category_plot_sources_scatter(var,
+                                                                  show_grid=show_grid,
+                                                                  jitter_amount=jitter_amount, custom_colors=source_colors, category='Q')
+                                else:
+                                    features_plot_hex(var, type_option, color_scheme,
+                                                      scaling='mean', feature_name=feature_name)
+                    else:
+                        if customize_colors:
+                            sources = [f.split(' [')[0] for f in sources]
+                            init_custom_colors(sources)
+                            source_colors = {src: st.session_state.custom_colors.get(
+                                src, None) for src in sources} if customize_colors else None
+                        else:
+                            source_colors = None
+
+                        if st.session_state.som.topology == 'rectangular':
+                            if visualization_type == 'Scatter':
+                                scatter_plot_sources(
+                                    st.session_state.som, sources, st.session_state.raw_df, X, 'name',
+                                    custom_colors=source_colors, jitter_amount=jitter_amount, show_grid=show_grid)
+                            elif visualization_type == 'Rectangular':
+                                category_map = project_feature(
+                                    st.session_state.som, X, st.session_state.raw_df['name'], valid_values=sources)
+                                category_plot_sources(
+                                    category_map, custom_colors=source_colors)
+                        elif st.session_state.som.topology == 'hexagonal':
+                            if visualization_type == 'Scatter':
+                                scatter_plot_sources_hex(
+                                    st.session_state.som, sources, st.session_state.raw_df, X, 'name',
+                                    custom_colors=source_colors, jitter_amount=jitter_amount, show_grid=show_grid)
+                            elif visualization_type == 'Hexbin':
+                                category_map = project_feature(
+                                    st.session_state.som, X, st.session_state.raw_df['name'], valid_values=sources)
+                                category_plot_sources_hex(
+                                    category_map, custom_colors=source_colors)
+
             elif plot_type == 'Source Dispersion Visualization':
                 if st.session_state.som.topology == 'rectangular':
                     vis_type_string = 'Rectangular'
@@ -687,7 +811,7 @@ if st.session_state.SOM_loaded:
                                 custom_colors=source_colors, jitter_amount=jitter_amount, show_grid=show_grid)
                         elif visualization_type == 'Rectangular':
                             category_map = project_feature(
-                                st.session_state.som, X, st.session_state.raw_df['name'], sources)
+                                st.session_state.som, X, st.session_state.raw_df['name'], valid_values=sources)
                             category_plot_sources(
                                 category_map, custom_colors=source_colors)
                     elif st.session_state.som.topology == 'hexagonal':
@@ -697,7 +821,7 @@ if st.session_state.SOM_loaded:
                                 custom_colors=source_colors, jitter_amount=jitter_amount, show_grid=show_grid)
                         elif visualization_type == 'Hexbin':
                             category_map = project_feature(
-                                st.session_state.som, X, st.session_state.raw_df['name'], sources)
+                                st.session_state.som, X, st.session_state.raw_df['name'], valid_values=sources)
                             category_plot_sources_hex(
                                 category_map, custom_colors=source_colors)
 
@@ -1215,7 +1339,7 @@ if st.session_state.SOM_loaded:
                                 custom_colors=type_colors, jitter_amount=jitter_amount, show_grid=show_grid)
                         elif visualization_type == 'Rectangular':
                             category_map = project_feature(
-                                st.session_state.som, X, st.session_state.raw_df[st.session_state.simbad_type], main_type_)
+                                st.session_state.som, X, st.session_state.raw_df[st.session_state.simbad_type], valid_values=main_type_)
 
                             # Check if clustering overlay is enabled and results are available
                             if overlay_clustering and clustering_results is not None:
@@ -1290,7 +1414,7 @@ if st.session_state.SOM_loaded:
                                 custom_colors=type_colors, jitter_amount=jitter_amount, show_grid=show_grid)
                         elif visualization_type == 'Hexbin':
                             category_map = project_feature(
-                                st.session_state.som, X, st.session_state.raw_df[st.session_state.simbad_type], main_type_)
+                                st.session_state.som, X, st.session_state.raw_df[st.session_state.simbad_type], valid_values=main_type_)
 
                             # Check if clustering overlay is enabled and results are available
                             if overlay_clustering and clustering_results is not None:
@@ -1464,305 +1588,6 @@ if st.session_state.SOM_loaded:
     if (plot_submit and plot_type == 'Feature Visualization' and
         hasattr(st.session_state, 'feature_viz_scaling') and
             len(st.session_state.feature_viz_scaling) > 0):
-
-        def create_multi_features_plot(var_map, scaling_options, color_type, color_scheme, feature_name, topology='rectangular'):
-            """Create multiple feature plots side by side with shared colorbar"""
-            import altair as alt
-            import pandas as pd
-            import numpy as np
-
-            if len(scaling_options) == 1:
-                # Single plot - use existing function
-                if topology == 'rectangular':
-                    if is_string(var_map):
-                        category_plot_sources(var_map)
-                    else:
-                        features_plot(var_map, color_type, color_scheme,
-                                      scaling=scaling_options[0], feature_name=feature_name)
-                else:
-                    if is_string(var_map):
-                        category_plot_sources_hex(var_map)
-                    else:
-                        features_plot_hex(var_map, color_type, color_scheme,
-                                          scaling=scaling_options[0], feature_name=feature_name)
-                return
-
-            # Multiple plots
-            plots = []
-            all_values = []
-
-            # Process each scaling option
-            for scaling in scaling_options:
-                # Prepare the data for this scaling
-                _map = list(map(list, zip(*var_map)))  # flip
-                np_map = np.empty((len(_map), len(_map[0])))
-
-                # Apply scaling
-                if scaling == 'sum':
-                    for idx_outer, sublist_outer in enumerate(_map):
-                        for idx_inner, sublist in enumerate(sublist_outer):
-                            try:
-                                np_map[idx_outer][idx_inner] = sum(sublist)
-                            except TypeError:
-                                np_map[idx_outer][idx_inner] = 0
-                elif scaling == 'mean':
-                    for idx_outer, sublist_outer in enumerate(_map):
-                        for idx_inner, sublist in enumerate(sublist_outer):
-                            try:
-                                np_map[idx_outer][idx_inner] = np.mean(sublist)
-                            except TypeError:
-                                np_map[idx_outer][idx_inner] = 0
-                elif scaling == 'max':
-                    for idx_outer, sublist_outer in enumerate(_map):
-                        for idx_inner, sublist in enumerate(sublist_outer):
-                            try:
-                                np_map[idx_outer][idx_inner] = max(sublist)
-                            except TypeError:
-                                np_map[idx_outer][idx_inner] = 0
-                elif scaling == 'min':
-                    for idx_outer, sublist_outer in enumerate(_map):
-                        for idx_inner, sublist in enumerate(sublist_outer):
-                            try:
-                                np_map[idx_outer][idx_inner] = min(sublist)
-                            except TypeError:
-                                np_map[idx_outer][idx_inner] = 0
-                elif scaling == 'median':
-                    for idx_outer, sublist_outer in enumerate(_map):
-                        for idx_inner, sublist in enumerate(sublist_outer):
-                            try:
-                                np_map[idx_outer][idx_inner] = np.median(
-                                    sublist)
-                            except TypeError:
-                                np_map[idx_outer][idx_inner] = 0
-                elif scaling == 'std':
-                    for idx_outer, sublist_outer in enumerate(_map):
-                        for idx_inner, sublist in enumerate(sublist_outer):
-                            try:
-                                np_map[idx_outer][idx_inner] = np.std(sublist)
-                            except TypeError:
-                                np_map[idx_outer][idx_inner] = 0
-
-                # Convert to DataFrame
-                df_map = pd.DataFrame(np_map, columns=range(
-                    1, len(np_map)+1), index=range(1, len(np_map)+1))
-                df_map = df_map.melt(
-                    var_name='x', value_name='value', ignore_index=False)
-                df_map = df_map.reset_index()
-                df_map = df_map.rename(columns={'index': 'y'})
-                df_map['scaling'] = scaling
-
-                plots.append(df_map)
-                all_values.extend(df_map['value'].tolist())
-
-            # Combine all dataframes
-            combined_df = pd.concat(plots, ignore_index=True)
-
-            # Calculate global min/max for shared colorbar
-            global_min = min(
-                [v for v in all_values if v > float('-inf')] or [0])
-            global_max = max(
-                [v for v in all_values if v < float('inf')] or [1])
-
-            # For log scale, handle zero/negative values
-            if color_type == "log":
-                if global_min <= 0:
-                    positive_values = [v for v in all_values if v > 0]
-                    if positive_values:
-                        global_min = min(positive_values)
-                    else:
-                        global_min = 0.01
-                        st.warning(
-                            "No positive values found for log scale. Using default minimum value.")
-
-            # Get grid size and create tick values
-            grid_size = len(_map)
-            x_domain = list(range(1, grid_size + 1))
-            y_domain = list(range(1, grid_size + 1))
-
-            if grid_size % 2 == 0:
-                tick_values = [1] + [i for i in range(2, grid_size + 1, 2)]
-            else:
-                tick_values = [i for i in range(1, grid_size + 1, 2)]
-
-            if grid_size not in tick_values:
-                tick_values.append(grid_size)
-            tick_values.sort()
-
-            # Calculate subplot width
-            total_width = 1200  # Total width for all plots (readable size)
-            # Account for spacing
-            plot_width = min(400, total_width // len(scaling_options) - 10)
-
-            if topology == 'rectangular':
-                # Create individual charts for rectangular topology
-                charts = []
-                for i, scaling in enumerate(scaling_options):
-                    scaling_data = combined_df[combined_df['scaling'] == scaling]
-
-                    # Only show legend on the rightmost plot
-                    show_legend = (i == len(scaling_options) - 1)
-
-                    chart = alt.Chart(scaling_data).mark_rect().encode(
-                        x=alt.X('x:O', title='',
-                                scale=alt.Scale(domain=x_domain, padding=0.5),
-                                axis=alt.Axis(
-                                    values=tick_values,
-                                    labelAngle=0,
-                                    tickOpacity=1,
-                                    domainOpacity=1,
-                                    labels=True,
-                                    labelOverlap=False
-                                )),
-                        y=alt.Y('y:O', title='',
-                                sort=alt.EncodingSortField(
-                                    'y', order='descending'),
-                                scale=alt.Scale(domain=y_domain, padding=0.5),
-                                axis=alt.Axis(
-                                    values=tick_values,
-                                    tickOpacity=1,
-                                    domainOpacity=1,
-                                    labels=True,
-                                    labelOverlap=False
-                                )),
-                        color=alt.Color(
-                            'value:Q',
-                            scale=alt.Scale(type=color_type, domain=(
-                                global_min, global_max), scheme=color_scheme),
-                            legend=alt.Legend(
-                                orient='bottom',
-                                direction='horizontal',
-                                gradientLength=min(plot_width, 200),
-                                gradientThickness=10,
-                                title=None
-                            ) if show_legend else None
-                        )
-                    ).properties(
-                        height=200,
-                        width=plot_width,
-                        title={
-                            "text": f"{scaling}",
-                            "anchor": "middle",
-                            "fontSize": 12,
-                            "fontWeight": "bold",
-                            "offset": 5
-                        }
-                    )
-                    charts.append(chart)
-
-                # Concatenate charts horizontally
-                final_chart = alt.hconcat(*charts, spacing=0).resolve_scale(
-                    color='shared'
-                ).properties(
-                    title={
-                        "text": f"{feature_name} - Feature Visualization",
-                        "anchor": "middle",
-                        "fontSize": 12,
-                        "fontWeight": "bold",
-                        "offset": 15
-                    }
-                ).configure_view(
-                    strokeWidth=0
-                )
-
-            else:
-                # Hexagonal topology
-                charts = []
-                height_f, width_f = 600, 650  # compensate the absence of number of neurons
-                total_width = width_f * len(scaling_options)
-                for i, scaling in enumerate(scaling_options):
-                    scaling_data = combined_df[combined_df['scaling'] == scaling]
-
-                    # Calculate hexagon properties
-                    max_x = scaling_data['x'].max()
-                    max_y = scaling_data['y'].max()
-                    min_x = scaling_data['x'].min()
-                    min_y = scaling_data['y'].min()
-
-                    size = 8
-                    hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
-
-                    # Only show legend on the rightmost plot
-                    show_legend = (i == 0)
-
-                    chart = alt.Chart(scaling_data).mark_point(shape=hexagon, size=size**2).encode(
-                        x=alt.X('xFeaturePos:Q', title='',
-                                scale=alt.Scale(domain=[0, grid_size + 1.5]),
-                                axis=alt.Axis(
-                                    grid=False,
-                                    values=tick_values,
-                                    tickOpacity=1,
-                                    domainOpacity=1,
-                                    labels=False,
-                                    labelOverlap=False
-                                )),
-                        y=alt.Y('y:Q',
-                                sort=alt.EncodingSortField(
-                                    'y', order='descending'),
-                                title='',
-                                scale=alt.Scale(domain=[0, grid_size + 1.5]),
-                                axis=alt.Axis(
-                                    grid=False,
-                                    labelPadding=20,
-                                    values=tick_values,
-                                    tickOpacity=1,
-                                    domainOpacity=1,
-                                    labels=False,
-                                    labelOverlap=False
-                                )),
-                        color=alt.Color('value:Q', scale=alt.Scale(
-                            scheme=color_scheme, type='pow')),
-                        fill=alt.Fill(
-                            'value:Q',
-                            scale=alt.Scale(type=color_type, domain=(
-                                global_min, global_max), scheme=color_scheme),
-                            legend=alt.Legend(
-                                orient='none',
-                                direction='horizontal',
-                                gradientLength=total_width-25,
-                                gradientThickness=25,
-                                legendX=0,
-                                legendY=height_f + 10,
-                                title=None,
-                                labelFontSize=28,
-                                tickCount=10
-                            ) if show_legend else None
-                        ),
-                        stroke=alt.value('black'),
-                        strokeWidth=alt.value(1.0)
-                    ).transform_calculate(
-                        xFeaturePos='(datum.y%2)/2 + datum.x-.5'
-                    ).properties(
-                        height=height_f,
-                        width=width_f,
-                        title={
-                            "text": f"{scaling}",
-                            "anchor": "middle",
-                            "fontSize": 28,
-                            "fontWeight": "bold",
-                            "offset": -5
-                        }
-                    )
-
-                    charts.append(chart)
-
-                # Concatenate charts horizontally
-                final_chart = alt.hconcat(*charts, spacing=0).resolve_scale(
-                    color='shared'
-                ).properties(
-                    title={
-                        "text": f"{feature_name}",
-                        "anchor": "middle",
-                        "fontSize": 36,
-                        "fontWeight": "bold",
-                        "offset": 10
-                    }
-                ).configure_view(
-                    strokeWidth=0
-                )
-
-            st.write('## SOM Feature Visualization')
-            st.altair_chart(final_chart, use_container_width=True,
-                            key=f'{feature_name}')
 
         # Handle the plotting based on dataset choice
         if st.session_state.feature_viz_dataset_choice == 'Use the main dataset':

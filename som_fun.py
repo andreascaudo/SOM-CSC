@@ -185,12 +185,15 @@ def update_feature_scale_range(feature_name, metric_type, min_val, max_val, colo
 
 def is_string(var):
     is_string = True
-    for sublist in var:
-        for sublist2 in sublist:
-            for value in sublist2:
-                if value is not None and not isinstance(value, str) and not (isinstance(value, float) and np.isnan(value)):
-                    is_string = False
-                    return is_string
+    try:
+        for sublist in var:
+            for sublist2 in sublist:
+                for value in sublist2:
+                    if value is not None and not isinstance(value, str) and not (isinstance(value, float) and np.isnan(value)):
+                        is_string = False
+                        return is_string
+    except:
+        return False
     return is_string
 
 
@@ -1233,10 +1236,10 @@ def scatter_plot_sources_hex(som, sources, raw_df, X, column_name, custom_colors
     st.altair_chart(combined_chart, use_container_width=True)
 
 
-def project_feature(som, X, feature, source=None):
-    '''
-    Returns a 2D map of lists containing the values of the external feature for each neuron of the SOM
-    '''
+'''
+def project_feature_sources(som, X, feature, sources):
+    
+    #Returns a 2D map of lists containing the values of the external feature for each neuron of the SOM
     map = [[[None] for _ in range(som._weights.shape[1])]
            for _ in range(som._weights.shape[0])]
     for cnt, xx in enumerate(X):
@@ -1252,6 +1255,52 @@ def project_feature(som, X, feature, source=None):
             map[w[0]][w[1]].append(feature[cnt])
 
     return map
+'''
+
+
+def project_feature(som, X, feature, filter_by=None, valid_values=None):
+    '''
+    Returns a 2D map of lists containing the values of the external feature for each neuron of the SOM.
+    Filtering logic:
+      - If filter_by is None and valid_values is given, use feature[cnt] for filtering.
+      - If filter_by is not None and valid_values is given, use filter_by[cnt] for filtering.
+      - If valid_values is None, do not filter.
+    '''
+    n_rows, n_cols = som._weights.shape[0], som._weights.shape[1]
+    map_ = [[[None] for _ in range(n_cols)] for _ in range(n_rows)]
+    for cnt, xx in enumerate(X):
+        # Filtering logic
+        value_to_check = feature[cnt] if filter_by is None else filter_by[cnt]
+        if valid_values is not None and value_to_check not in valid_values:
+            continue
+        w = som.winner(xx)
+        if map_[w[0]][w[1]][0] is None:
+            map_[w[0]][w[1]] = [feature[cnt]]
+        else:
+            map_[w[0]][w[1]].append(feature[cnt])
+    return map_
+
+
+def project_external_feature(som, X, feature):
+    '''
+    Returns a 2D map of lists containing the values of the external feature for each neuron of the SOM.
+    Filtering logic:
+      - If filter_by is None and valid_values is given, use feature[cnt] for filtering.
+      - If filter_by is not None and valid_values is given, use filter_by[cnt] for filtering.
+      - If valid_values is None, do not filter.
+    '''
+    n_rows, n_cols = som._weights.shape[0], som._weights.shape[1]
+    map_ = [[[None] for _ in range(n_cols)] for _ in range(n_rows)]
+    for cnt, xx in enumerate(X):
+        name = xx[0]
+        if name not in feature.keys():
+            continue
+        w = som.winner(np.array(xx[1:], dtype=float))
+        if map_[w[0]][w[1]][0] is None:
+            map_[w[0]][w[1]] = [feature[name]]
+        else:
+            map_[w[0]][w[1]].append(feature[name])
+    return map_
 
 
 def category_plot_sources(_map, flip=True, custom_colors=None, cluster_mapping=None, cluster_border_colors=None):
@@ -1366,6 +1415,185 @@ def category_plot_sources(_map, flip=True, custom_colors=None, cluster_mapping=N
     st.write('## SOM category plot')
     st.altair_chart(scatter_chart_sample, use_container_width=True)
 
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def category_plot_sources_scatter(
+    _map,
+    *,
+    flip: bool = True,
+    show_grid: bool = False,
+    jitter_amount: float = 0.5,
+    random_state: int = 42,
+    category: str = "N",   # optional explicit order
+    title: str = None,
+    custom_colors: None,
+
+):
+    """
+    Scatter-style visualisation of categorical sources on a SOM lattice.
+
+    Parameters
+    ----------
+    _map : list[list[str | int | list]]
+        2-D list where each cell contains the *dominant* category for that
+        SOM node (string or int).  If the cell stores a list, the first
+        element is taken; change the logic below if you prefer "mode".
+    flip : bool, default True
+        Transpose `_map` so that *row 0* ends up on top of the plot,
+        matching the other SOM utilities.
+    show_grid : bool, default False
+        Overlay a light hexagon grid for orientation.
+    jitter_amount : float, default 0.5
+        Maximum radial jitter in SOM-lattice units.
+    random_state : int | None
+        Seed for reproducible jitter.
+    category_order : list[str] | None
+        Fix the order of categories in the legend/colour scale.
+        If None, the order is inferred from the data.
+    color_scheme : str
+        Name of a built-in Vega categorical palette ("category10", "tableau20"…).
+    title : str | None
+        Optional custom title for the chart.
+    """
+
+    # 1 ── prepare the map ────────────────────────────────────────────────
+    if flip:
+        _map = list(map(list, zip(*_map)))
+
+    # Prepare color scale based on custom colors if provided
+    if custom_colors:
+        # Create a custom color scale using the user-provided colors
+        domain = list(custom_colors.keys())
+        range_ = list(custom_colors.values())
+
+        color_scale = alt.Scale(
+            domain=domain,
+            range=range_
+        )
+    else:
+        # Use default color scheme
+        color_scale = alt.Scale(scheme='lightmulti')
+
+    data = []
+    for y, row in enumerate(_map, 1):
+        for x, cell in enumerate(row, 1):
+            # if a cell stores a list, pick the *first* label; adapt as needed
+            if isinstance(cell, (list, tuple)):
+                if len(cell) > 0:
+                    for label in cell:
+                        if label is not None:
+                            data.append(
+                                {"x": x, "y": y, "feature": str(label)})
+            elif cell is not None:
+                data.append({"x": x, "y": y, "feature": str(cell)})
+
+    df = pd.DataFrame(data)
+
+    grid_size = len(_map)
+
+    # 2 ── compute cell centres & jitter ──────────────────────────────────
+    df["x_centre"] = (df["y"] % 2)/2 + df["x"]
+    df["y_centre"] = df["y"]
+
+    if jitter_amount > 0:
+        if random_state is not None:
+            np.random.seed(random_state)
+
+        n = len(df)
+        angles = np.random.uniform(0, 2*np.pi, n)
+        radii = np.sqrt(np.random.uniform(0, jitter_amount, n)) * 0.5
+        df["x_plot"] = df["x_centre"] + radii * np.cos(angles)
+        df["y_plot"] = df["y_centre"] + radii * np.sin(angles)
+    else:
+        df["x_plot"], df["y_plot"] = df["x_centre"], df["y_centre"]
+
+    # 3 ── colour handling ────────────────────────────────────────────────
+    color = alt.Color(
+        "feature:" + category,
+        scale=color_scale,
+        legend=alt.Legend(
+            orient='bottom',
+            direction='horizontal',
+            gradientLength=615,
+            gradientThickness=20
+        )
+    )
+
+    # 4 ── ticks & point size ─────────────────────────────────────────────
+    size = new_sizes[np.where(new_dimensions == grid_size)[0][0]]
+    ticks = ([1] + list(range(2, grid_size+1, 2))) if grid_size % 2 == 0 \
+        else list(range(1, grid_size+1, 2))
+    if grid_size not in ticks:
+        ticks.append(grid_size)
+    ticks.sort()
+
+    # 5 ── base scatter layer (no config yet!) ───────────────────────────
+    scatter_base = (
+        alt.Chart(df)
+           .mark_circle()
+           .encode(
+               x=alt.X("x_plot:Q", title="",
+                       scale=alt.Scale(domain=[0, grid_size + 1.5]),
+                       axis=alt.Axis(grid=False, values=ticks,
+                                     tickOpacity=1, domainOpacity=1,
+                                     labelOverlap=False)),
+               y=alt.Y("y_plot:Q", title="",
+                       scale=alt.Scale(domain=[0, grid_size + 1.5]),
+                       axis=alt.Axis(grid=False, values=ticks,
+                                     tickOpacity=1, domainOpacity=1,
+                                     labelOverlap=False)),
+               color=color,
+               tooltip=['feature:' + category, 'x_plot:Q', 'y_plot:Q']
+        )
+    )
+
+    # 6 ── optional hex-grid layer ───────────────────────────────────────
+    if show_grid:
+        # assumes you have create_empty_hexagon_df() & st.session_state.som
+        hexagon_grid_df = create_empty_hexagon_df(st.session_state.som)
+        hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
+        grid_layer = (
+            alt.Chart(hexagon_grid_df)
+               .mark_point(shape=hexagon, size=size**2, opacity=0.25)
+               .encode(
+                   x=alt.X("xFeaturePos:Q", title="",
+                           scale=alt.Scale(domain=[0, grid_size + 1.5])),
+                   y=alt.Y("y:Q",           title="",
+                           scale=alt.Scale(domain=[0, grid_size + 1.5])),
+                   stroke=alt.value("gray"),
+                   strokeWidth=alt.value(0.5),
+                   fill=alt.value("white")
+            )
+            .transform_calculate(xFeaturePos="(datum.y%2)/2 + datum.x - 1")
+        )
+        base = alt.layer(grid_layer, scatter_base)
+    else:
+        base = scatter_base
+
+    # 7 ── top-level config & display ────────────────────────────────────
+    chart_title = title or "SOM categories"
+    combined_chart = (
+        base
+        .properties(
+            height=750,
+            width=600,
+            title={
+                "text": chart_title,
+                "anchor": "middle",
+                "fontSize": 16,
+                "fontWeight": "bold",
+                "offset": 1,
+            }
+        )
+        .configure_view(strokeWidth=0)
+        .interactive(bind_x=None, bind_y=None)
+    )
+
+    st.write("## SOM category scatter plot")
+    st.altair_chart(combined_chart, use_container_width=True)
+# ─────────────────────────────────────────────────────────────────────────────
+
 
 def category_plot_sources_hex(_map, flip=True, custom_colors=None, cluster_mapping=None, enhanced_border_colors=None, standard_border_colors=None, cluster_stroke_width=4, enhanced_border_width=4, som_shape=None):
     if flip:
@@ -1394,7 +1622,7 @@ def category_plot_sources_hex(_map, flip=True, custom_colors=None, cluster_mappi
     winning_categories = np.array(winning_categories)
 
     pd_winning_categories = pd.DataFrame(
-        winning_categories, columns=['y', 'x', 'source'])
+        winning_categories, columns=['y', 'x', 'feature'])
 
     min_x = pd_winning_categories['x'].min()
     max_x = pd_winning_categories['x'].max()
@@ -1578,13 +1806,13 @@ def category_plot_sources_hex(_map, flip=True, custom_colors=None, cluster_mappi
                 'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])
             ).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
             color=alt.Color(
-                'source:N', scale=color_scale),
-            fill=alt.Color('source:N', scale=color_scale).legend(
+                'feature:N', scale=color_scale),
+            fill=alt.Color('feature:N', scale=color_scale).legend(
                 orient='bottom'),
             stroke=alt.value('#000000'),  # Default black border
             # Default stroke width for non-cluster mode
             strokeWidth=alt.value(1.0),
-            tooltip=['source:N', 'x:Q', 'y:Q']
+            tooltip=['feature:N', 'x:Q', 'y:Q']
         ).transform_calculate(
             # This field is required for the hexagonal X-Offset
             xFeaturePos='(datum.y%2)/2 + datum.x-.5'
@@ -1929,6 +2157,179 @@ def features_plot_hex(_map, color_type, color_scheme, scaling='mean', flip=True,
     st.altair_chart(c, use_container_width=True)
 
     return c
+
+
+def features_plot_hex_scatter(
+    _map,
+    color_type: str,
+    color_scheme: str,
+    scaling: str = "mean",
+    flip: bool = True,
+    feature_name: str = None,
+    show_grid: bool = False,
+    jitter_amount: float = 0.5,
+):
+    """
+    Scatter version of `features_plot_hex` with optional jitter.
+
+    Parameters
+    ----------
+    ...
+    jitter_amount : float, default 0.0
+        Maximum Cartesian distance of the random offset, expressed
+        in *SOM lattice units*.  E.g. 0.25 means “up to a quarter‐cell”.
+        Set it to 0 to keep the exact cell centres.
+    random_state : int | None
+        Seed for NumPy’s RNG so the jitter is reproducible.
+    """
+
+    random_state = 42
+
+    # ---------- 1. same data preparation as before ---------------------
+    if flip:
+        _map = list(map(list, zip(*_map)))
+
+    np_map = np.empty((len(_map), len(_map[0])))
+    agg_func = {
+        "sum": np.sum, "mean": np.mean, "max": np.max,
+        "min": np.min, "median": np.median, "std": np.std
+    }.get(scaling)
+    if agg_func is None:
+        raise ValueError(f"Unknown scaling '{scaling}'")
+
+    for i, row in enumerate(_map):
+        for j, cell in enumerate(row):
+            try:
+                np_map[i, j] = agg_func(cell)
+            except TypeError:
+                np_map[i, j] = np.nan
+
+    df = (pd.DataFrame(np_map, columns=range(1, len(_map)+1),
+                       index=range(1, len(_map)+1))
+          .melt(var_name="x", value_name="value", ignore_index=False)
+          .reset_index()
+          .rename(columns={"index": "y"}))
+
+    grid_size = len(_map)
+
+    # ---------- 2. compute *precise* cell centres -----------------------
+    df["x_centre"] = (df["y"] % 2)/2 + df["x"] - 0.5
+    df["y_centre"] = df["y"]
+
+    # ---------- 3. add the random jitter (your logic, vectorised) -------
+    if jitter_amount > 0:
+        if random_state is not None:
+            np.random.seed(random_state)
+
+        n = len(df)
+        angles = np.random.uniform(0, 2*np.pi, n)
+        radii = np.sqrt(np.random.uniform(0, jitter_amount, n)) * 0.5
+        df["x_plot"] = df["x_centre"] + radii * np.cos(angles)
+        df["y_plot"] = df["y_centre"] + radii * np.sin(angles)
+    else:
+        df["x_plot"] = df["x_centre"]
+        df["y_plot"] = df["y_centre"]
+
+    # ---------- 4. colour-scale bookkeeping (unchanged) -----------------
+    local_min, local_max = df["value"].min(), df["value"].max()
+    metric_type = "statistical" if scaling in {
+        "sum", "std"} else "single_value"
+
+    if feature_name:
+        min_val, max_val = update_feature_scale_range(
+            feature_name, metric_type, local_min, local_max, color_type)
+        if color_type == "log" and feature_name in feature_scale_ranges:
+            min_val = feature_scale_ranges[feature_name][metric_type].get(
+                "log_min", min_val)
+    else:
+        min_val, max_val = local_min, local_max
+
+    if color_type == "log" and min_val <= 0:
+        positive = df.loc[df["value"] > 0, "value"]
+        min_val = positive.min() if not positive.empty else 0.01
+
+    # ---------- 5. axis ticks, sizing helper (same) ---------------------
+    size = new_sizes[np.where(new_dimensions == grid_size)[0][0]]
+    ticks = ([1] + list(range(2, grid_size+1, 2))) if grid_size % 2 == 0 \
+        else list(range(1, grid_size+1, 2))
+    if grid_size not in ticks:
+        ticks.append(grid_size)
+    ticks.sort()
+
+    min_x, max_x = df["x_plot"].min(), df["x_plot"].max()
+    min_y, max_y = df["y_plot"].min(), df["y_plot"].max()
+
+    if show_grid:
+        hexagon_grid_df = create_empty_hexagon_df(st.session_state.som)
+        # Hexagon shape definition
+        hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
+        hexagon_grid = alt.Chart(hexagon_grid_df).mark_point(
+            shape=hexagon,
+            size=size**2,
+            opacity=0.25  # Semi-transparent hexagons
+        ).encode(
+            x=alt.X('xFeaturePos:Q', title='', scale=alt.Scale(domain=[min_x, max_x])).axis(
+                grid=False, tickOpacity=0, domainOpacity=0),
+            y=alt.Y('y:Q', sort=alt.EncodingSortField(
+                'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])).axis(grid=False, tickOpacity=0, domainOpacity=0),
+            stroke=alt.value('gray'),
+            strokeWidth=alt.value(0.5),
+            fill=alt.value('white')
+        ).transform_calculate(
+            xFeaturePos='(datum.y%2)/2 + datum.x-1'  # Shifted 0.5 units left
+        )
+
+    # ---------- 6. build the chart --------------------------------------
+    scatter = (
+        alt.Chart(df)
+           .mark_circle()
+           .encode(
+               x=alt.X("x_plot:Q", title="",
+                       scale=alt.Scale(domain=[0, grid_size + 1.5]),
+                       axis=alt.Axis(grid=False, values=ticks,
+                                     tickOpacity=1, domainOpacity=1,
+                                     labelOverlap=False)),
+               y=alt.Y("y_plot:Q", title="",
+                       scale=alt.Scale(domain=[0, grid_size + 1.5]),
+                       axis=alt.Axis(grid=False, values=ticks,
+                                     tickOpacity=1, domainOpacity=1,
+                                     labelOverlap=False)),
+               color=alt.Color("value:Q",
+                               scale=alt.Scale(type=color_type,
+                                               domain=(min_val, max_val),
+                                               scheme=color_scheme),
+                               legend=alt.Legend(orient="bottom",
+                                                 direction="horizontal",
+                                                 gradientLength=615,
+                                                 gradientThickness=20))
+        )
+    )
+
+    if show_grid:
+        combined_chart = alt.layer(hexagon_grid, scatter).properties(
+            height=750,
+            width=600,
+            title={
+                "text": f"{feature_name} ({scaling})" if feature_name else f"{scaling} value",
+                "anchor": "middle",
+                "fontSize": 16,
+                "fontWeight": "bold",
+                "offset": 1,
+            }).configure_view(strokeWidth=0).interactive(bind_x=None, bind_y=None)
+    else:
+        combined_chart = scatter.properties(
+            height=750,
+            width=600,
+            title={
+                "text": f"{feature_name} ({scaling})" if feature_name else f"{scaling} value",
+                "anchor": "middle",
+                "fontSize": 16,
+                "fontWeight": "bold",
+                "offset": 1,
+            }).configure_view(strokeWidth=0).interactive(bind_x=None, bind_y=None)
+
+    st.write("## SOM feature scatter plot")
+    st.altair_chart(combined_chart, use_container_width=True)
 
 
 def features_plot(_map, color_type, color_scheme, scaling='mean', flip=True, feature_name=None):
@@ -2979,3 +3380,303 @@ def category_plot_sources_hex_with_size_variation(_map, flip=True, custom_colors
 
     st.write('## SOM category plot (Size-based Clusters)')
     st.altair_chart(c, use_container_width=True)
+
+
+def create_multi_features_plot(var_map, scaling_options, color_type, color_scheme, feature_name, topology='rectangular'):
+    """Create multiple feature plots side by side with shared colorbar"""
+    import altair as alt
+    import pandas as pd
+    import numpy as np
+
+    if len(scaling_options) == 1:
+        # Single plot - use existing function
+        if topology == 'rectangular':
+            if is_string(var_map):
+                category_plot_sources(var_map)
+            else:
+                features_plot(var_map, color_type, color_scheme,
+                              scaling=scaling_options[0], feature_name=feature_name)
+        else:
+            if is_string(var_map):
+                category_plot_sources_hex(var_map)
+            else:
+                features_plot_hex(var_map, color_type, color_scheme,
+                                  scaling=scaling_options[0], feature_name=feature_name)
+        return
+
+    # Multiple plots
+    plots = []
+    all_values = []
+
+    # Process each scaling option
+    for scaling in scaling_options:
+        # Prepare the data for this scaling
+        _map = list(map(list, zip(*var_map)))  # flip
+        np_map = np.empty((len(_map), len(_map[0])))
+
+        # Apply scaling
+        if scaling == 'sum':
+            for idx_outer, sublist_outer in enumerate(_map):
+                for idx_inner, sublist in enumerate(sublist_outer):
+                    try:
+                        np_map[idx_outer][idx_inner] = sum(sublist)
+                    except TypeError:
+                        np_map[idx_outer][idx_inner] = 0
+        elif scaling == 'mean':
+            for idx_outer, sublist_outer in enumerate(_map):
+                for idx_inner, sublist in enumerate(sublist_outer):
+                    try:
+                        np_map[idx_outer][idx_inner] = np.mean(sublist)
+                    except TypeError:
+                        np_map[idx_outer][idx_inner] = 0
+        elif scaling == 'max':
+            for idx_outer, sublist_outer in enumerate(_map):
+                for idx_inner, sublist in enumerate(sublist_outer):
+                    try:
+                        np_map[idx_outer][idx_inner] = max(sublist)
+                    except TypeError:
+                        np_map[idx_outer][idx_inner] = 0
+        elif scaling == 'min':
+            for idx_outer, sublist_outer in enumerate(_map):
+                for idx_inner, sublist in enumerate(sublist_outer):
+                    try:
+                        np_map[idx_outer][idx_inner] = min(sublist)
+                    except TypeError:
+                        np_map[idx_outer][idx_inner] = 0
+        elif scaling == 'median':
+            for idx_outer, sublist_outer in enumerate(_map):
+                for idx_inner, sublist in enumerate(sublist_outer):
+                    try:
+                        np_map[idx_outer][idx_inner] = np.median(
+                            sublist)
+                    except TypeError:
+                        np_map[idx_outer][idx_inner] = 0
+        elif scaling == 'std':
+            for idx_outer, sublist_outer in enumerate(_map):
+                for idx_inner, sublist in enumerate(sublist_outer):
+                    try:
+                        np_map[idx_outer][idx_inner] = np.std(sublist)
+                    except TypeError:
+                        np_map[idx_outer][idx_inner] = 0
+
+        # Convert to DataFrame
+        df_map = pd.DataFrame(np_map, columns=range(
+            1, len(np_map)+1), index=range(1, len(np_map)+1))
+        df_map = df_map.melt(
+            var_name='x', value_name='value', ignore_index=False)
+        df_map = df_map.reset_index()
+        df_map = df_map.rename(columns={'index': 'y'})
+        df_map['scaling'] = scaling
+
+        plots.append(df_map)
+        all_values.extend(df_map['value'].tolist())
+
+    # Combine all dataframes
+    combined_df = pd.concat(plots, ignore_index=True)
+
+    # Calculate global min/max for shared colorbar
+    global_min = min(
+        [v for v in all_values if v > float('-inf')] or [0])
+    global_max = max(
+        [v for v in all_values if v < float('inf')] or [1])
+
+    # For log scale, handle zero/negative values
+    if color_type == "log":
+        if global_min <= 0:
+            positive_values = [v for v in all_values if v > 0]
+            if positive_values:
+                global_min = min(positive_values)
+            else:
+                global_min = 0.01
+                st.warning(
+                    "No positive values found for log scale. Using default minimum value.")
+
+    # Get grid size and create tick values
+    grid_size = len(_map)
+    x_domain = list(range(1, grid_size + 1))
+    y_domain = list(range(1, grid_size + 1))
+
+    if grid_size % 2 == 0:
+        tick_values = [1] + [i for i in range(2, grid_size + 1, 2)]
+    else:
+        tick_values = [i for i in range(1, grid_size + 1, 2)]
+
+    if grid_size not in tick_values:
+        tick_values.append(grid_size)
+    tick_values.sort()
+
+    # Calculate subplot width
+    total_width = 1200  # Total width for all plots (readable size)
+    # Account for spacing
+    plot_width = min(400, total_width // len(scaling_options) - 10)
+
+    if topology == 'rectangular':
+        # Create individual charts for rectangular topology
+        charts = []
+        for i, scaling in enumerate(scaling_options):
+            scaling_data = combined_df[combined_df['scaling'] == scaling]
+
+            # Only show legend on the rightmost plot
+            show_legend = (i == len(scaling_options) - 1)
+
+            chart = alt.Chart(scaling_data).mark_rect().encode(
+                x=alt.X('x:O', title='',
+                        scale=alt.Scale(domain=x_domain, padding=0.5),
+                        axis=alt.Axis(
+                            values=tick_values,
+                            labelAngle=0,
+                            tickOpacity=1,
+                            domainOpacity=1,
+                            labels=True,
+                            labelOverlap=False
+                        )),
+                y=alt.Y('y:O', title='',
+                        sort=alt.EncodingSortField(
+                            'y', order='descending'),
+                        scale=alt.Scale(domain=y_domain, padding=0.5),
+                        axis=alt.Axis(
+                            values=tick_values,
+                            tickOpacity=1,
+                            domainOpacity=1,
+                            labels=True,
+                            labelOverlap=False
+                        )),
+                color=alt.Color(
+                    'value:Q',
+                    scale=alt.Scale(type=color_type, domain=(
+                        global_min, global_max), scheme=color_scheme),
+                    legend=alt.Legend(
+                        orient='bottom',
+                        direction='horizontal',
+                        gradientLength=min(plot_width, 200),
+                        gradientThickness=10,
+                        title=None
+                    ) if show_legend else None
+                )
+            ).properties(
+                height=200,
+                width=plot_width,
+                title={
+                    "text": f"{scaling}",
+                    "anchor": "middle",
+                    "fontSize": 12,
+                    "fontWeight": "bold",
+                    "offset": 5
+                }
+            )
+            charts.append(chart)
+
+        # Concatenate charts horizontally
+        final_chart = alt.hconcat(*charts, spacing=0).resolve_scale(
+            color='shared'
+        ).properties(
+            title={
+                "text": f"{feature_name} - Feature Visualization",
+                "anchor": "middle",
+                "fontSize": 12,
+                "fontWeight": "bold",
+                "offset": 15
+            }
+        ).configure_view(
+            strokeWidth=0
+        )
+
+    else:
+        # Hexagonal topology
+        charts = []
+        height_f, width_f = 600, 650  # compensate the absence of number of neurons
+        total_width = width_f * len(scaling_options)
+        for i, scaling in enumerate(scaling_options):
+            scaling_data = combined_df[combined_df['scaling'] == scaling]
+
+            # Calculate hexagon properties
+            max_x = scaling_data['x'].max()
+            max_y = scaling_data['y'].max()
+            min_x = scaling_data['x'].min()
+            min_y = scaling_data['y'].min()
+
+            size = 8
+            hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
+
+            # Only show legend on the rightmost plot
+            show_legend = (i == 0)
+
+            chart = alt.Chart(scaling_data).mark_point(shape=hexagon, size=size**2).encode(
+                x=alt.X('xFeaturePos:Q', title='',
+                        scale=alt.Scale(domain=[0, grid_size + 1.5]),
+                        axis=alt.Axis(
+                            grid=False,
+                            values=tick_values,
+                            tickOpacity=1,
+                            domainOpacity=1,
+                            labels=False,
+                            labelOverlap=False
+                        )),
+                y=alt.Y('y:Q',
+                        sort=alt.EncodingSortField(
+                            'y', order='descending'),
+                        title='',
+                        scale=alt.Scale(domain=[0, grid_size + 1.5]),
+                        axis=alt.Axis(
+                            grid=False,
+                            labelPadding=20,
+                            values=tick_values,
+                            tickOpacity=1,
+                            domainOpacity=1,
+                            labels=False,
+                            labelOverlap=False
+                        )),
+                color=alt.Color('value:Q', scale=alt.Scale(
+                    scheme=color_scheme, type='pow')),
+                fill=alt.Fill(
+                    'value:Q',
+                    scale=alt.Scale(type=color_type, domain=(
+                        global_min, global_max), scheme=color_scheme),
+                    legend=alt.Legend(
+                        orient='none',
+                        direction='horizontal',
+                        gradientLength=total_width-25,
+                        gradientThickness=25,
+                        legendX=0,
+                        legendY=height_f + 10,
+                        title=None,
+                        labelFontSize=28,
+                        tickCount=10
+                    ) if show_legend else None
+                ),
+                stroke=alt.value('black'),
+                strokeWidth=alt.value(1.0)
+            ).transform_calculate(
+                xFeaturePos='(datum.y%2)/2 + datum.x-.5'
+            ).properties(
+                height=height_f,
+                width=width_f,
+                title={
+                    "text": f"{scaling}",
+                    "anchor": "middle",
+                    "fontSize": 28,
+                    "fontWeight": "bold",
+                    "offset": -5
+                }
+            )
+
+            charts.append(chart)
+
+        # Concatenate charts horizontally
+        final_chart = alt.hconcat(*charts, spacing=0).resolve_scale(
+            color='shared'
+        ).properties(
+            title={
+                "text": f"{feature_name}",
+                "anchor": "middle",
+                "fontSize": 36,
+                "fontWeight": "bold",
+                "offset": 10
+            }
+        ).configure_view(
+            strokeWidth=0
+        )
+
+    st.write('## SOM Feature Visualization')
+    st.altair_chart(final_chart, use_container_width=True,
+                    key=f'{feature_name}')
