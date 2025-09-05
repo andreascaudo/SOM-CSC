@@ -291,12 +291,12 @@ else:
     st.sidebar.write('Select the SOM hyperparameters')
     dim = st.sidebar.slider(
         'Dimension', 6, 100, 40, help='The map\'s dimensions will be [dim x dim], forming a square layout.')
-    sigma = st.sidebar.slider('Sigma', 0.01, 25.0, 3.8,
+    sigma = st.sidebar.slider('Sigma', 0.01, 25.0, 3.5,
                               help='The spread of the neighborhood function')
     learning_rate = st.sidebar.slider(
-        'Learning rate', 0.01, 5.0, 1.8, help='The degree of weight updates')
+        'Learning rate', 0.01, 5.0, 0.03, help='The degree of weight updates')
     iterations = st.sidebar.slider(
-        'Iterations', 0, 1000000, 100000, 10000, help='Number of training iterations')
+        'Iterations', 0, 1000000, 740000, 10000, help='Number of training iterations')
     topology = st.sidebar.selectbox(
         'Topology', ['hexagonal', 'rectangular'], help='Topology of the neurons in the SOM grid')
     seed = st.sidebar.number_input(
