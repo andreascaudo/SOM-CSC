@@ -1194,7 +1194,7 @@ def scatter_plot_sources_hex(som, sources, raw_df, X, column_name, custom_colors
                 grid=False, tickOpacity=0, domainOpacity=0),
             y=alt.Y('y:Q', sort=alt.EncodingSortField(
                 'y', order='descending'), title='', scale=alt.Scale(domain=[min_y-1, max_y+1])).axis(grid=False, tickOpacity=0, domainOpacity=0),
-            stroke=alt.value('gray'),
+            stroke=alt.value('black'),
             strokeWidth=alt.value(0.5),
             fill=alt.value('white')
         ).transform_calculate(
