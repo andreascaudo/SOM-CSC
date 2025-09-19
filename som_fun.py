@@ -1704,7 +1704,6 @@ def category_plot_sources_hex(_map, flip=True, custom_colors=None, cluster_mappi
 
         # Create the fill chart for SIMBAD types with standard borders
         if standard_border_colors and len(standard_border_colors) > 1:
-            st.write(pd_winning_categories)
             # Use conditional coloring for standard borders when customization is enabled
             standard_domain = list(standard_border_colors.keys())
             standard_range = list(standard_border_colors.values())
