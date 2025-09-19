@@ -1,5 +1,7 @@
 from sklearn.preprocessing import MinMaxScaler
 from collections import defaultdict
+from sklearn.model_selection import StratifiedGroupKFold
+from sklearn.metrics import classification_report, confusion_matrix
 import time
 import pandas as pd
 import numpy as np
@@ -8,6 +10,10 @@ import streamlit as st
 import altair as alt
 import math
 import itertools
+# do delate after analysis
+from itertools import product
+from sklearn.metrics import f1_score, precision_recall_fscore_support, confusion_matrix, classification_report
+
 
 # Global dictionary to store min/max values per feature and metric type
 # Structure: {feature_name: {'single_value': {'min': val, 'max': val}, 'statistical': {'min': val, 'max': val}}}
@@ -1698,6 +1704,7 @@ def category_plot_sources_hex(_map, flip=True, custom_colors=None, cluster_mappi
 
         # Create the fill chart for SIMBAD types with standard borders
         if standard_border_colors and len(standard_border_colors) > 1:
+            st.write(pd_winning_categories)
             # Use conditional coloring for standard borders when customization is enabled
             standard_domain = list(standard_border_colors.keys())
             standard_range = list(standard_border_colors.values())
@@ -1708,8 +1715,8 @@ def category_plot_sources_hex(_map, flip=True, custom_colors=None, cluster_mappi
                 strokeWidth=1.0  # Always use standard width for fill chart
             ).encode(
                 **base_encoding,
-                color=alt.Color('source:N', scale=color_scale),
-                fill=alt.Color('source:N', scale=color_scale).legend(
+                color=alt.Color('feature:N', scale=color_scale),
+                fill=alt.Color('feature:N', scale=color_scale).legend(
                     orient='bottom'),
                 stroke=alt.condition(
                     alt.datum.cluster_id >= 0,  # Only apply cluster color if cluster_id is valid
@@ -1720,7 +1727,7 @@ def category_plot_sources_hex(_map, flip=True, custom_colors=None, cluster_mappi
                     # Fallback to default for non-clustered neurons
                     alt.value(default_standard_color)
                 ),
-                tooltip=['source:N', 'x:Q', 'y:Q', alt.Tooltip(
+                tooltip=['feature:N', 'x:Q', 'y:Q', alt.Tooltip(
                     'cluster_id:N', title='Cluster'), alt.Tooltip(
                     'is_boundary:N', title='Boundary')]
             ).transform_calculate(
@@ -1735,11 +1742,11 @@ def category_plot_sources_hex(_map, flip=True, custom_colors=None, cluster_mappi
                 strokeWidth=1.0  # Always use standard width for fill chart
             ).encode(
                 **base_encoding,
-                color=alt.Color('source:N', scale=color_scale),
-                fill=alt.Color('source:N', scale=color_scale).legend(
+                color=alt.Color('feature:N', scale=color_scale),
+                fill=alt.Color('feature:N', scale=color_scale).legend(
                     orient='bottom'),
                 stroke=alt.value(default_standard_color),
-                tooltip=['source:N', 'x:Q', 'y:Q', alt.Tooltip(
+                tooltip=['feature:N', 'x:Q', 'y:Q', alt.Tooltip(
                     'cluster_id:N', title='Cluster'), alt.Tooltip(
                     'is_boundary:N', title='Boundary')]
             ).transform_calculate(
@@ -1772,7 +1779,7 @@ def category_plot_sources_hex(_map, flip=True, custom_colors=None, cluster_mappi
                 alt.value(1.0),
                 alt.value(0.0)  # Hide non-boundary neurons in enhanced chart
             ),
-            tooltip=['source:N', 'x:Q', 'y:Q', alt.Tooltip(
+            tooltip=['feature:N', 'x:Q', 'y:Q', alt.Tooltip(
                 'cluster_id:N', title='Cluster'), alt.Tooltip(
                 'is_boundary:N', title='Boundary')]
         ).transform_calculate(
@@ -2594,20 +2601,1177 @@ def update_dataset_to_classify(dataset_toclassify, assignments_central, assignme
     return dataset_toclassify
 
 
-def get_classification(som_map_id, dataset_toclassify, simbad_dataset, SIMBAD_classes, parameters_classification, dim, som):
+'''
+def get_classification_analysis_tree(
+    som_map_id,
+    dataset_toclassify,
+    simbad_dataset,
+    SIMBAD_classes,
+    parameters_classification,
+    dim,
+    som,
+):
+    """
+    One-function analysis using ONLY the generic predict_tree() decision logic.
+    - Auto-splits by source (StratifiedGroupKFold).
+    - Builds train-only histograms for the provided CLASSES.
+    - Grid-searches parameters (stage0/anchor/adapt) on validation.
+    - Returns best config + val/test metrics and predictions.
+
+    parameters_classification (optional) can include:
+      - "CLASSES": list of labels to use (default ["QSO","YSO","Star"])
+      - "coverage_floor": float in [0,1], default 0.75
+      - "balance_hist": bool, default True (prior-correct histograms)
+      - "random_state": int, default 42
+    """
+    import numpy as np
+    import pandas as pd
+    from itertools import product
+    from sklearn.model_selection import StratifiedGroupKFold
+    from sklearn.metrics import (
+        precision_recall_fscore_support,
+        classification_report,
+        confusion_matrix,
+    )
+
+    # ----------------------------- helpers -----------------------------
+    def build_dataset():
+        # robust row-wise build (keeps lists aligned)
+        rows = []
+        # keep your current source of class column
+        simbad_type = st.session_state.simbad_type
+        for id_, src, lbl in zip(simbad_dataset["id"], simbad_dataset["name"], simbad_dataset[simbad_type]):
+            if id_ in id_to_pos:
+                rows.append((src, id_, id_to_pos[id_], lbl))
+        df = pd.DataFrame(rows, columns=["source", "det_id", "bmu", "label"])
+
+        def _to_xy(v):
+            if isinstance(v, (tuple, list)) and len(v) == 2:
+                return int(v[0]), int(v[1])
+            if isinstance(v, dict):
+                return int(v.get("x")), int(v.get("y"))
+            if isinstance(v, str):
+                x, y = v.replace("(", "").replace(")", "").split(",")
+                return int(float(x)), int(float(y))
+            raise ValueError(f"Unrecognized BMU format: {v}")
+
+        bxy = df["bmu"].apply(_to_xy).tolist()
+        df["bmu_x"] = [x for x, _ in bxy]
+        df["bmu_y"] = [y for _, y in bxy]
+        return df
+
+    def smooth3(arr):
+        pad = np.pad(arr, ((1, 1), (1, 1), (0, 0)), mode="edge")
+        out = np.empty_like(arr)
+        for i in range(arr.shape[0]):
+            for j in range(arr.shape[1]):
+                out[i, j, :] = pad[i:i+3, j:j+3, :].sum(axis=(0, 1))
+        return out
+
+    def build_repr(train_df, classes, W, H, alpha=1.0, balance=True):
+        idx = {c: i for i, c in enumerate(classes)}
+        hist = np.zeros((W, H, len(classes)), dtype=np.float64)
+        tr = train_df[train_df["label"].isin(classes)]
+        for _, r in tr.iterrows():
+            hist[int(r.bmu_x), int(r.bmu_y), idx[r.label]] += 1.0
+        if balance:
+            class_counts = hist.sum(axis=(0, 1))
+            w = class_counts.sum() / (len(classes) * (class_counts + 1e-9))
+            hist = hist * w.reshape(1, 1, -1)
+        hist_s = smooth3(hist)
+        post = hist_s + alpha
+        post /= post.sum(axis=2, keepdims=True)
+        purity = post.max(axis=2)
+        support_s = hist_s.sum(axis=2)
+        assert post.shape[-1] == len(classes), "post last dim != len(classes)"
+        return post, purity, support_s
+
+    def predict_tree(dfin, classes, params, post, purity, support_s):
+        IDX = {c: i for i, c in enumerate(classes)}
+        MIN_SUPPORT = params.get("MIN_SUPPORT", 5)
+        MIN_PURITY = params.get("MIN_PURITY", 0.55)
+        # list of {"label","TAU","MARGIN"}
+        stage0 = params.get("stage0", [])
+        # {"label","TAU","MARGIN","right_group":[...]}
+        anchor = params.get("anchor", None)
+        # {"group":[g1,g2], "BASE","K","MIN","MAX"}
+        adapt = params.get("adapt", None)
+
+        rows = []
+        for _, r in dfin.iterrows():
+            x, y = int(r.bmu_x), int(r.bmu_y)
+
+            if support_s[x, y] == 0:
+                rows.append((r.label, None, 0.0, True))
+                continue
+
+            p = post[x, y, :].astype(float)
+            sup = float(support_s[x, y])
+            pur = float(purity[x, y])
+
+            if (sup < MIN_SUPPORT) or (pur < MIN_PURITY):
+                rows.append((r.label, None, p.max(), True))
+                continue
+
+            # Stage-0 one-vs-rest gates (optional)
+            fired = False
+            for gate in stage0:
+                lbl = gate["label"]
+                if lbl in IDX:
+                    p_new = float(p[IDX[lbl]])
+                    p_rest = float(1.0 - p_new)
+                    if (p_new >= gate.get("TAU", 0.60)) and ((p_new - p_rest) >= gate.get("MARGIN", 0.10)):
+                        rows.append((r.label, lbl, p_new, False))
+                        fired = True
+                        break
+            if fired:
+                continue
+
+            # Anchor split (e.g., "QSO" vs stellar group)
+            if anchor and (anchor["label"] in IDX):
+                left_lbl = anchor["label"]
+                right_lbls = [g for g in anchor.get(
+                    "right_group", []) if g in IDX]
+                right_idx = [IDX[g] for g in right_lbls]
+                p_left = float(p[IDX[left_lbl]])
+                p_right = float(p[right_idx].sum()) if right_idx else 0.0
+
+                if (p_left >= anchor.get("TAU", 0.60)) and ((p_left - p_right) >= anchor.get("MARGIN", 0.10)):
+                    rows.append((r.label, left_lbl, p_left, False))
+                    continue
+
+                # Inside right group
+                if adapt:
+                    grp_lbls = [g for g in adapt.get("group", []) if g in IDX]
+                    if len(grp_lbls) == 2:
+                        g1, g2 = grp_lbls
+                        g1i, g2i = IDX[g1], IDX[g2]
+                        denom = float(p[[g1i, g2i]].sum())
+                        if denom <= 1e-12:
+                            rows.append((r.label, None, 0.0, True))
+                            continue
+                        pg1 = float(p[g1i] / denom)
+                        pg2 = float(p[g2i] / denom)
+                        base = adapt.get("BASE", 0.12)
+                        k = adapt.get("K", 0.30)
+                        tmin = adapt.get("MIN", 0.08)
+                        tmax = adapt.get("MAX", 0.50)
+                        th = max(tmin, min(base + k*(1.0 - pur), tmax))
+                        if abs(pg1 - pg2) < th:
+                            rows.append((r.label, None, max(pg1, pg2), True))
+                        else:
+                            pred = g1 if pg1 >= pg2 else g2
+                            rows.append((r.label, pred, max(pg1, pg2), False))
+                        continue
+                    elif len(right_lbls) > 0:
+                        # fallback: argmax *within* right group (not global)
+                        sel = right_idx[np.argmax(p[right_idx])]
+                        rows.append(
+                            (r.label, classes[sel], float(p[sel]), False))
+                        continue
+
+            # Final fallback: global argmax
+            pred_idx = int(p.argmax())
+            rows.append((r.label, classes[pred_idx], float(p.max()), False))
+
+        return pd.DataFrame(rows, columns=["true", "pred", "conf", "abstain"])
+
+    def compute_metrics(res, classes):
+        cov = 1.0 - res.abstain.mean()
+        kept = res[~res.abstain]
+        if len(kept) == 0:
+            return {"coverage": cov, "macro_f1": 0.0, "per_class_f1": {c: 0.0 for c in classes},
+                    "n_kept": 0, "n_total": len(res)}
+        pr, rc, f1, _ = precision_recall_fscore_support(
+            kept["true"], kept["pred"], labels=classes, zero_division=0
+        )
+        return {"coverage": cov, "macro_f1": float(f1.mean()),
+                "per_class_f1": dict(zip(classes, f1)),
+                "n_kept": len(kept), "n_total": len(res)}
+
+    # ----------------------------- build id→BMU map & dataset -----------------------------
     id_to_pos = {}
     for (i, j), ids in som_map_id.items():
         for id_ in ids:
             id_to_pos[id_] = (i, j)
 
-    # Extract IDs and positions for classified detections
+    dataset = build_dataset()
+
+    # Target classes
+    TARGET_CLASSES = None
+    if isinstance(parameters_classification, dict) and "CLASSES" in parameters_classification:
+        TARGET_CLASSES = list(parameters_classification["CLASSES"])
+    if TARGET_CLASSES is None:
+        TARGET_CLASSES = ["QSO", "YSO", "Star"]  # sane default
+
+    dataset = dataset[dataset["label"].isin(
+        TARGET_CLASSES)].reset_index(drop=True)
+    if dataset.empty:
+        raise ValueError("No rows left after filtering to TARGET_CLASSES.")
+
+    # Grid size from observed coords
+    W = int(dataset["bmu_x"].max()) + 1
+    H = int(dataset["bmu_y"].max()) + 1
+
+    # ----------------------------- split (grouped + stratified) -----------------------------
+    rs = parameters_classification.get("random_state", 42) if isinstance(
+        parameters_classification, dict) else 42
+    sgkf = StratifiedGroupKFold(n_splits=10, shuffle=True, random_state=rs)
+    fold = np.empty(len(dataset), dtype=int)
+    for k, (_, test_idx) in enumerate(sgkf.split(X=np.zeros(len(dataset)),
+                                                 y=dataset["label"],
+                                                 groups=dataset["source"])):
+        fold[test_idx] = k
+    dataset["fold"] = fold
+
+    train = dataset[dataset.fold.isin({0, 1, 2, 3, 4, 5, 6})].copy()
+    val = dataset[dataset.fold.isin({7})].copy()
+    test = dataset[dataset.fold.isin({8, 9})].copy()
+
+    # sanity: no source leakage
+    assert set(train.source) & set(val.source) == set()
+    assert set(train.source) & set(test.source) == set()
+    assert set(val.source) & set(test.source) == set()
+
+    # ----------------------------- build representation for THESE classes -------------------
+    ALPHA = 1.0
+    balance_hist = parameters_classification.get(
+        "balance_hist", True) if isinstance(parameters_classification, dict) else True
+    post, purity, support_s = build_repr(
+        train, TARGET_CLASSES, W, H, alpha=ALPHA, balance=balance_hist)
+
+    # ----------------------------- parameter grid (auto from CLASSES) -----------------------
+    # Choose anchor (prefer QSO; else most frequent in train)
+    if "QSO" in TARGET_CLASSES:
+        anchor_label = "QSO"
+    else:
+        anchor_label = train["label"].value_counts().idxmax()
+    non_anchor = [c for c in TARGET_CLASSES if c != anchor_label]
+
+    # stage0 candidates: none, or pick exactly one non-anchor class (e.g., XrayBin)
+    stage0_options = [None] + non_anchor
+
+    coverage_floor = parameters_classification.get(
+        "coverage_floor", 0.75) if isinstance(parameters_classification, dict) else 0.75
+
+    def param_grid():
+        # global gates
+        MIN_SUPPORT_vals = [5, 8] if len(train) > 300 else [5]
+        MIN_PURITY_vals = [0.55, 0.60]
+        # anchor gates
+        TAU_vals = [0.55, 0.60]
+        MARGIN_vals = [0.08, 0.10]
+        # stage0 gates
+        TAU_NEW_vals = [0.55, 0.60]
+        MARGIN_NEW_vals = [0.08, 0.12]
+        # adaptive stellar-like split
+        BASE_vals = [0.10, 0.12]
+        K_vals = [0.20, 0.30]
+        MIN_val, MAX_val = 0.08, 0.50
+
+        for MIN_SUPPORT, MIN_PURITY in product(MIN_SUPPORT_vals, MIN_PURITY_vals):
+            for stage0_lbl in stage0_options:
+                # define right_group (rest after subtracting anchor and stage0)
+                # dummy to satisfy lint
+                right_group = [c in TARGET_CLASSES and c or c for c in []]
+                right_group = [c for c in TARGET_CLASSES if c not in {
+                    anchor_label, stage0_lbl}]
+                # stage0 dict
+                stage0_dicts = []
+                if stage0_lbl is None:
+                    stage0_dicts = [[]]  # no stage0
+                else:
+                    stage0_dicts = [[{"label": stage0_lbl, "TAU": TAU_NEW, "MARGIN": MARGIN_NEW}]
+                                    for TAU_NEW, MARGIN_NEW in product(TAU_NEW_vals, MARGIN_NEW_vals)]
+                # anchor configs
+                for TAU, MARGIN in product(TAU_vals, MARGIN_vals):
+                    for stage0_cfg in stage0_dicts:
+                        params = {
+                            "MIN_SUPPORT": MIN_SUPPORT,
+                            "MIN_PURITY":  MIN_PURITY,
+                            "stage0":      stage0_cfg,  # [] or [{'label',...}]
+                            "anchor":      {"label": anchor_label, "TAU": TAU, "MARGIN": MARGIN, "right_group": right_group},
+                        }
+                        # adapt only if right_group is exactly 2 classes
+                        if len(right_group) == 2:
+                            for BASE, K in product(BASE_vals, K_vals):
+                                p = params.copy()
+                                p["adapt"] = {
+                                    "group": right_group, "BASE": BASE, "K": K, "MIN": MIN_val, "MAX": MAX_val}
+                                yield p
+                        else:
+                            # no adapt; still a valid config (argmax within right_group)
+                            yield params
+
+    # ----------------------------- grid search on validation -------------------------------
+    def eval_on(df, classes, params, post, purity, support_s):
+        res = predict_tree(df, classes, params, post, purity, support_s)
+        m = compute_metrics(res, classes)
+        return res, m
+
+    best = None
+    best_res_val = None
+    top_rows = []
+
+    for params in param_grid():
+        res_val, m = eval_on(val, TARGET_CLASSES, params,
+                             post, purity, support_s)
+        row = {"macro_f1": m["macro_f1"], "coverage": m["coverage"], "params": params,
+               "n_kept": m["n_kept"], "n_total": m["n_total"]}
+        top_rows.append(row)
+        feasible = (m["coverage"] >= coverage_floor)
+        score_key = (feasible, m["macro_f1"], m["coverage"], m["n_kept"])
+        if best is None or score_key > best[0]:
+            best = (score_key, params, m)
+            best_res_val = res_val
+
+    # print a compact Top-5 validation table
+    top_sorted = sorted(
+        top_rows,
+        key=lambda r: (r["coverage"] >= coverage_floor,
+                       r["macro_f1"], r["coverage"], r["n_kept"]),
+        reverse=True
+    )[:5]
+    print("\nTop 5 (predict_tree) on Validation:")
+    for r in top_sorted:
+        print(
+            f"  F1={r['macro_f1']:.3f} | cov={r['coverage']:.3f} | kept={r['n_kept']}/{r['n_total']} | params={r['params']}")
+
+    # best on validation
+    best_params = best[1]
+    best_val_metrics = best[2]
+
+    print("\n=== BEST (predict_tree) ON VALIDATION ===")
+    print(f"Macro-F1: {best_val_metrics['macro_f1']:.3f} | Coverage: {best_val_metrics['coverage']:.3f} "
+          f"({best_val_metrics['n_kept']}/{best_val_metrics['n_total']})")
+    print("Params:", best_params)
+    print("Per-class F1:", best_val_metrics["per_class_f1"])
+
+    # ----------------------------- run on TEST with best params ----------------------------
+    res_test, test_metrics = eval_on(
+        test, TARGET_CLASSES, best_params, post, purity, support_s)
+
+    print("\n=== TEST with best validation config (predict_tree) ===")
+    cov = test_metrics["coverage"]
+    kept = int(test_metrics["n_kept"])
+    tot = int(test_metrics["n_total"])
+    print(f"Coverage: {cov:.3f} ({kept}/{tot})")
+    if kept > 0:
+        kept_df = res_test[~res_test.abstain]
+        print(classification_report(kept_df.true,
+              kept_df.pred, labels=TARGET_CLASSES, digits=3))
+        print("Confusion matrix (kept only):\n", confusion_matrix(
+            kept_df.true, kept_df.pred, labels=TARGET_CLASSES))
+
+    # ----------------------------- return a tidy summary -----------------------------------
+    return {
+        "classes": TARGET_CLASSES,
+        "best_params": best_params,
+        "val_metrics": best_val_metrics,
+        "val_predictions": best_res_val,   # DataFrame: true, pred, conf, abstain
+        "test_metrics": test_metrics,
+        "test_predictions": res_test,      # DataFrame
+        "train_val_test_sizes": {
+            "train": len(train), "val": len(val), "test": len(test),
+            "train_sources": int(train["source"].nunique()),
+            "val_sources":   int(val["source"].nunique()),
+            "test_sources":  int(test["source"].nunique()),
+        },
+        "anchor_label": anchor_label,
+    }
+
+
+def get_classification_analysis(som_map_id, dataset_toclassify, simbad_dataset, SIMBAD_classes, parameters_classification, dim, som):
+    id_to_pos = {}
+    for (i, j), ids in som_map_id.items():
+        for id_ in ids:
+            id_to_pos[id_] = (i, j)
+
+    # Extract IDs, positions and classes for classified detections
     classified_ids = simbad_dataset['id'].tolist()
     classified_positions = [id_to_pos[id_]
                             for id_ in classified_ids if id_ in id_to_pos]
-    # Extract classes for classified detections
     classified_classes = simbad_dataset[st.session_state.simbad_type].tolist()
 
-    # Create a mapping from positions to classes
+    source_id = simbad_dataset['name'].tolist()
+
+    # print distribution of classes
+    dataset = pd.DataFrame({
+        "source": source_id,
+        "det_id": classified_ids,
+        "bmu": classified_positions,
+        "label": classified_classes,
+    })
+
+    if "bmu_x" not in dataset.columns or "bmu_y" not in dataset.columns:
+        def _to_xy(v):
+            # accepts (x,y), [x,y], {"x":..,"y":..}, or "x,y"
+            if isinstance(v, (tuple, list)) and len(v) == 2:
+                return int(v[0]), int(v[1])
+            if isinstance(v, dict):
+                return int(v.get("x")), int(v.get("y"))
+            if isinstance(v, str):
+                x, y = v.replace("(", "").replace(")", "").split(",")
+                return int(float(x)), int(float(y))
+            raise ValueError(f"Unrecognized BMU format: {v}")
+
+        bmu_xy = dataset["bmu"].apply(_to_xy).tolist()
+        dataset["bmu_x"] = [x for x, _ in bmu_xy]
+        dataset["bmu_y"] = [y for _, y in bmu_xy]
+
+    # --- Predictors rewritten to take params -------------------------------------------------
+    CLASSES = ["QSO", "YSO", "Star"]
+    IDX = {c: i for i, c in enumerate(CLASSES)}
+    # Laplace smoothing  # cap (avoid over-abstaining)
+    ALPHA = 1.0
+
+    dataset = dataset[dataset["label"].isin(
+        CLASSES)].reset_index(drop=True)
+
+    # infer grid size from observed coords
+    W = dataset["bmu_x"].max() + 1
+    H = dataset["bmu_y"].max() + 1
+
+    # --------------------- split (grouped + stratified) ---------------------
+    sgkf = StratifiedGroupKFold(n_splits=10, shuffle=True, random_state=42)
+    fold = np.empty(len(dataset), dtype=int)
+    for k, (_, test_idx) in enumerate(sgkf.split(X=np.zeros(len(dataset)), y=dataset["label"], groups=dataset["source"])):
+        fold[test_idx] = k
+    dataset["fold"] = fold
+
+    # map folds to ~70/15/15 (7/1.5/1.5 ≈ 7/1/2 here → 70/10/20 OR choose 7/1/2 as below)
+    train_folds = {0, 1, 2, 3, 4, 5, 6}
+    val_folds = {7}
+    test_folds = {8, 9}
+
+    train = dataset[dataset.fold.isin(train_folds)].copy()
+    val = dataset[dataset.fold.isin(val_folds)].copy()
+    test = dataset[dataset.fold.isin(test_folds)].copy()
+
+    # sanity: no source leakage
+    assert set(train.source) & set(val.source) == set()
+    assert set(train.source) & set(test.source) == set()
+    assert set(val.source) & set(test.source) == set()
+
+    # --------------------- train-only BMU histograms ---------------------
+    # counts[u_x, u_y, class]
+    hist = np.zeros((W, H, len(CLASSES)), dtype=np.float64)
+
+    cls_to_idx = {c: i for i, c in enumerate(CLASSES)}
+    for _, r in train.iterrows():
+        hist[r.bmu_x, r.bmu_y, cls_to_idx[r.label]] += 1.0
+
+    support = hist.sum(axis=2)
+    # simple neighborhood smoothing (3x3 box) to reduce fragmentation
+
+    def smooth3(arr):
+        pad = np.pad(arr, ((1, 1), (1, 1), (0, 0)), mode='edge')
+        out = np.empty_like(arr)
+        for i in range(arr.shape[0]):
+            for j in range(arr.shape[1]):
+                window = pad[i:i+3, j:j+3, :]
+                out[i, j, :] = window.sum(axis=(0, 1))
+        return out
+
+    # After building train-only hist: hist[x,y,c]
+    # per-class totals in train
+    class_counts = hist.sum(axis=(0, 1))
+    w = class_counts.sum() / (len(CLASSES) * (class_counts + 1e-9))  # inverse frequency
+    hist_bal = hist * w.reshape(1, 1, -1)
+
+    hist_s = smooth3(hist_bal)
+
+    # Laplace smoothing → posteriors per BMU
+    post = (hist_s + ALPHA)
+    post /= post.sum(axis=2, keepdims=True)
+
+    # per-cell purity after smoothing
+    purity = post.max(axis=2)
+    support_s = hist_s.sum(axis=2)
+
+    def predict_flat(dfin, params):
+        MIN_SUPPORT = params["MIN_SUPPORT"]
+        MIN_PURITY = params["MIN_PURITY"]
+        MARGIN = params.get("MARGIN", 0.0)
+
+        rows = []
+        for _, r in dfin.iterrows():
+            x, y = int(r.bmu_x), int(r.bmu_y)
+
+            if support_s[x, y] == 0:
+                rows.append((r.label, None, 0.0, True))
+                continue
+
+            p = post[x, y, :]
+            # top-2 margin
+            top2 = np.partition(p, -2)[-2:]
+            margin = float(top2.max() - top2.min())
+
+            conf = float(p.max())
+            pred_idx = int(p.argmax())
+
+            abst = (support_s[x, y] < MIN_SUPPORT) or (
+                purity[x, y] < MIN_PURITY) or (margin < MARGIN)
+            rows.append(
+                (r.label, None if abst else CLASSES[pred_idx], conf, abst))
+        return pd.DataFrame(rows, columns=["true", "pred", "conf", "abstain"])
+
+    def predict_hier(dfin, params):
+        MIN_SUPPORT = params["MIN_SUPPORT"]
+        MIN_PURITY = params["MIN_PURITY"]
+        TAU_QSO = params["TAU_QSO"]
+        MARGIN_QSO = params["MARGIN_QSO"]
+        MARGIN_STELLAR = params["MARGIN_STELLAR"]
+
+        rows = []
+        for _, r in dfin.iterrows():
+            x, y = int(r.bmu_x), int(r.bmu_y)
+            if support_s[x, y] == 0:
+                rows.append((r.label, None, 0.0, True))
+                continue
+
+            p = post[x, y, :].astype(float)
+            sup = float(support_s[x, y])
+            pur = float(purity[x, y])
+            if (sup < MIN_SUPPORT) or (pur < MIN_PURITY):
+                rows.append((r.label, None, p.max(), True))
+                continue
+
+            p_qso, p_yso, p_star = p[IDX["QSO"]], p[IDX["YSO"]], p[IDX["Star"]]
+            p_stel = p_yso + p_star
+
+            if (p_qso >= TAU_QSO) and ((p_qso - p_stel) >= MARGIN_QSO):
+                rows.append((r.label, "QSO", float(p_qso), False))
+                continue
+
+            if p_stel <= 1e-12:
+                rows.append((r.label, None, 0.0, True))
+                continue
+
+            py = p_yso / p_stel
+            ps = p_star / p_stel
+            margin2 = abs(py - ps)
+            if margin2 < MARGIN_STELLAR:
+                rows.append((r.label, None, max(py, ps), True))
+            else:
+                pred = "YSO" if py >= ps else "Star"
+                conf = float(max(py, ps))
+                rows.append((r.label, pred, conf, False))
+        return pd.DataFrame(rows, columns=["true", "pred", "conf", "abstain"])
+
+    def predict_hier_adapt(dfin, params):
+        MIN_SUPPORT = params["MIN_SUPPORT"]
+        MIN_PURITY = params["MIN_PURITY"]
+        TAU_QSO = params["TAU_QSO"]
+        MARGIN_QSO = params["MARGIN_QSO"]
+        BASE_STELLAR = params["BASE_STELLAR"]
+        K_STELLAR = params["K_STELLAR"]
+        STELLAR_MIN = params.get("STELLAR_MIN", 0.08)
+        STELLAR_MAX = params.get("STELLAR_MAX", 0.50)
+
+        rows = []
+        for _, r in dfin.iterrows():
+            x, y = int(r.bmu_x), int(r.bmu_y)
+            if support_s[x, y] == 0:
+                rows.append((r.label, None, 0.0, True))
+                continue
+
+            p = post[x, y, :].astype(float)
+            sup = float(support_s[x, y])
+            pur = float(purity[x, y])
+            if (sup < MIN_SUPPORT) or (pur < MIN_PURITY):
+                rows.append((r.label, None, p.max(), True))
+                continue
+
+            p_qso, p_yso, p_star = p[IDX["QSO"]], p[IDX["YSO"]], p[IDX["Star"]]
+            p_stel = p_yso + p_star
+
+            if (p_qso >= TAU_QSO) and ((p_qso - p_stel) >= MARGIN_QSO):
+                rows.append((r.label, "QSO", float(p_qso), False))
+                continue
+
+            if p_stel <= 1e-12:
+                rows.append((r.label, None, 0.0, True))
+                continue
+
+            py = p_yso / p_stel
+            ps = p_star / p_stel
+
+            th_stellar = BASE_STELLAR + K_STELLAR * (1.0 - pur)
+            th_stellar = min(max(th_stellar, STELLAR_MIN), STELLAR_MAX)
+
+            if abs(py - ps) < th_stellar:
+                rows.append((r.label, None, max(py, ps), True))
+            else:
+                pred = "YSO" if py >= ps else "Star"
+                conf = float(max(py, ps))
+                rows.append((r.label, pred, conf, False))
+        return pd.DataFrame(rows, columns=["true", "pred", "conf", "abstain"])
+
+    # --- Metrics helpers --------------------------------------------------------------------
+    def compute_metrics(res):
+        cov = 1.0 - res.abstain.mean()
+        kept = res[~res.abstain]
+        if len(kept) == 0:
+            return {"coverage": cov, "macro_f1": 0.0, "per_class_f1": {c: 0.0 for c in CLASSES},
+                    "n_kept": 0, "n_total": len(res)}
+        pr, rc, f1, _ = precision_recall_fscore_support(
+            kept["true"], kept["pred"], labels=CLASSES, zero_division=0)
+        macro = float(f1.mean())
+        return {"coverage": cov, "macro_f1": macro,
+                "per_class_f1": dict(zip(CLASSES, f1)),
+                "n_kept": len(kept), "n_total": len(res)}
+
+    # --- Grid search ------------------------------------------------------------------------
+    def grid_iter(grid):
+        keys = list(grid.keys())
+        for values in product(*(grid[k] for k in keys)):
+            yield dict(zip(keys, values))
+
+    def eval_method_on_val(method, grid, coverage_floor=0.75, top_k=5):
+        all_runs = []
+        for params in grid_iter(grid):
+            if method == "flat":
+                res = predict_flat(val, params)
+            elif method == "hier":
+                res = predict_hier(val, params)
+            elif method == "hier_adapt":
+                res = predict_hier_adapt(val, params)
+            else:
+                raise ValueError("Unknown method")
+
+            m = compute_metrics(res)
+            all_runs.append({"method": method, "params": params, **m})
+
+        # choose best: macro-F1 under coverage constraint; tiebreak by coverage then kept
+        feasible = [r for r in all_runs if r["coverage"] >= coverage_floor]
+        pool = feasible if len(feasible) else all_runs
+        best = max(pool, key=lambda r: (
+            r["macro_f1"], r["coverage"], r["n_kept"]))
+
+        # print Top-K on val for this method
+        print(
+            f"\nTop {top_k} configs for method = {method} (sorted by macro-F1, then coverage):")
+        for r in sorted(pool, key=lambda r: (r["macro_f1"], r["coverage"]), reverse=True)[:top_k]:
+            print(
+                f"  F1={r['macro_f1']:.3f} | cov={r['coverage']:.3f} | params={r['params']}")
+        return best, all_runs
+
+    # --- Default grids (tweak as needed) ----------------------------------------------------
+    grid_flat = {
+        "MIN_SUPPORT": [5, 8, 10],
+        "MIN_PURITY":  [0.55, 0.60, 0.65],
+        "MARGIN":      [0.10, 0.12, 0.15],
+    }
+    grid_hier = {
+        "MIN_SUPPORT":   [5, 8],
+        "MIN_PURITY":    [0.55, 0.60],
+        "TAU_QSO":       [0.55, 0.60, 0.65],
+        "MARGIN_QSO":    [0.08, 0.10, 0.12],
+        "MARGIN_STELLAR": [0.12, 0.15, 0.18],
+    }
+    grid_hier_adapt = {
+        "MIN_SUPPORT":  [5, 8],
+        "MIN_PURITY":   [0.55, 0.60],
+        "TAU_QSO":      [0.55, 0.60],
+        "MARGIN_QSO":   [0.08, 0.10],
+        "BASE_STELLAR": [0.10, 0.12, 0.15],
+        "K_STELLAR":    [0.20, 0.30, 0.35],
+        "STELLAR_MIN":  [0.08],            # usually keep fixed
+        "STELLAR_MAX":  [0.40, 0.50],      # mild sensitivity
+    }
+
+    # Allow external override via parameters_classification dict (if you pass it in)
+    coverage_floor = parameters_classification.get(
+        "coverage_floor", 0.75) if isinstance(parameters_classification, dict) else 0.75
+
+    best_flat, _ = eval_method_on_val(
+        "flat",       grid_flat,       coverage_floor)
+    best_hier, _ = eval_method_on_val(
+        "hier",       grid_hier,       coverage_floor)
+    best_hier_ad, _ = eval_method_on_val(
+        "hier_adapt", grid_hier_adapt, coverage_floor)
+
+    candidates = [best_flat, best_hier, best_hier_ad]
+    best_overall = max(candidates, key=lambda r: (
+        r["macro_f1"], r["coverage"], r["n_kept"]))
+
+    print("\n=== BEST ON VALIDATION ===")
+    print(f"Method: {best_overall['method']}")
+    print(f"Macro-F1: {best_overall['macro_f1']:.3f} | Coverage: {best_overall['coverage']:.3f} "
+          f"({best_overall['n_kept']}/{best_overall['n_total']})")
+    print("Params:", best_overall["params"])
+    print("Per-class F1:", best_overall["per_class_f1"])
+
+'''
+
+
+def get_classification(som_map_id, dataset_toclassify, simbad_dataset, SIMBAD_classes, parameters_classification, dim, som):
+    # get_classification_analysis(som_map_id, dataset_toclassify, simbad_dataset,
+    #                            SIMBAD_classes, parameters_classification, dim, som)
+
+    para_class = {
+        "CLASSES": ["QSO", "YSO", "Star", "XrayBin"],  # 3-class example
+        "coverage_floor": 0.70,
+        "balance_hist": True,
+        "random_state": 42,
+    }
+
+    # ------------------------------------------------------------------
+    # 2) Call the function (3-class)
+    # ------------------------------------------------------------------
+    res3 = get_classification_analysis_tree(
+        som_map_id=som_map_id,
+        dataset_toclassify=dataset_toclassify,
+        simbad_dataset=simbad_dataset,
+        SIMBAD_classes=SIMBAD_classes,
+        parameters_classification=para_class,
+        dim=dim,
+        som=som,
+    )
+
+    print("\n--- SUMMARY (3 classes) ---")
+    print("Classes:", res3["classes"])
+    print("Best params:", res3["best_params"])
+    print("Validation macro-F1 / coverage:",
+          res3["val_metrics"]["macro_f1"], "/", res3["val_metrics"]["coverage"])
+    print("Test      macro-F1 / coverage:",
+          res3["test_metrics"]["macro_f1"], "/", res3["test_metrics"]["coverage"])
+
+    id_to_pos = {}
+    for (i, j), ids in som_map_id.items():
+        for id_ in ids:
+            id_to_pos[id_] = (i, j)
+
+    # Extract IDs, positions and classes for classified detections
+    classified_ids = simbad_dataset['id'].tolist()
+    classified_positions = [id_to_pos[id_]
+                            for id_ in classified_ids if id_ in id_to_pos]
+    classified_classes = simbad_dataset[st.session_state.simbad_type].tolist()
+
+    source_id = simbad_dataset['name'].tolist()
+
+    # print distribution of classes
+    dataset = pd.DataFrame({
+        "source": source_id,
+        "det_id": classified_ids,
+        "bmu": classified_positions,
+        "label": classified_classes,
+    })
+
+    if "bmu_x" not in dataset.columns or "bmu_y" not in dataset.columns:
+        def _to_xy(v):
+            # accepts (x,y), [x,y], {"x":..,"y":..}, or "x,y"
+            if isinstance(v, (tuple, list)) and len(v) == 2:
+                return int(v[0]), int(v[1])
+            if isinstance(v, dict):
+                return int(v.get("x")), int(v.get("y"))
+            if isinstance(v, str):
+                x, y = v.replace("(", "").replace(")", "").split(",")
+                return int(float(x)), int(float(y))
+            raise ValueError(f"Unrecognized BMU format: {v}")
+
+        bmu_xy = dataset["bmu"].apply(_to_xy).tolist()
+        dataset["bmu_x"] = [x for x, _ in bmu_xy]
+        dataset["bmu_y"] = [y for _, y in bmu_xy]
+
+    # --------------------- setup ---------------------
+    # CLASSES = ["QSO", "YSO", "Star"]      # XrayBin omitted
+    CLASSES = ["QSO", "YSO", "Star", "XrayBin"]
+    MIN_SUPPORT = 10                     # tune on val
+    MIN_PURITY = 0.55                    # tune on val
+    ALPHA = 1.0                           # Laplace smoothing
+    MARGIN = 0
+
+    TAU_QSO = 0.6     # min prob to call QSO
+    MARGIN_QSO = 0.1     # QSO vs Stellar margin (pQSO - pStellar)
+    MARGIN_STELLAR = 0.18     # YSO vs Star margin after renormalization
+
+    BASE_STELLAR = 0.12
+    K_STELLAR = 0.30
+    STELLAR_MIN = 0.08     # floor for margin
+    STELLAR_MAX = 0.50     # cap (avoid over-abstaining)
+
+    # params for tree
+    '''
+    params = {
+        "MIN_SUPPORT": 10,
+        "MIN_PURITY":  0.55,
+        "stage0":      [],  # none
+        "anchor":      {"label": "QSO", "TAU": 0.6, "MARGIN": 0.1, "right_group": ["YSO", "Star"]},
+        "adapt":       {"group": ["YSO", "Star"], "BASE": 0.12, "K": 0.30, "MIN": 0.08, "MAX": 0.50},
+    }
+    '''
+    params = {
+        "MIN_SUPPORT": 10,
+        "MIN_PURITY":  0.55,
+        # Stage-0 gate
+        "stage0":      [{"label": "XrayBin", "TAU": 0.60, "MARGIN": 0.10}],
+        "anchor":      {"label": "QSO", "TAU": 0.6, "MARGIN": 0.1, "right_group": ["YSO", "Star"]},
+        "adapt":       {"group": ["YSO", "Star"], "BASE": 0.12, "K": 0.30, "MIN": 0.08, "MAX": 0.50},
+    }
+
+    dataset = dataset[dataset["label"].isin(
+        CLASSES)].reset_index(drop=True)
+
+    # infer grid size from observed coords
+    W = dataset["bmu_x"].max() + 1
+    H = dataset["bmu_y"].max() + 1
+
+    # --------------------- split (grouped + stratified) ---------------------
+    sgkf = StratifiedGroupKFold(n_splits=10, shuffle=True, random_state=42)
+    fold = np.empty(len(dataset), dtype=int)
+    for k, (_, test_idx) in enumerate(sgkf.split(X=np.zeros(len(dataset)), y=dataset["label"], groups=dataset["source"])):
+        fold[test_idx] = k
+    dataset["fold"] = fold
+
+    # map folds to ~70/15/15 (7/1.5/1.5 ≈ 7/1/2 here → 70/10/20 OR choose 7/1/2 as below)
+    train_folds = {0, 1, 2, 3, 4, 5, 6}
+    val_folds = {7}
+    test_folds = {8, 9}
+
+    train = dataset[dataset.fold.isin(train_folds)].copy()
+    val = dataset[dataset.fold.isin(val_folds)].copy()
+    test = dataset[dataset.fold.isin(test_folds)].copy()
+
+    # sanity: no source leakage
+    assert set(train.source) & set(val.source) == set()
+    assert set(train.source) & set(test.source) == set()
+    assert set(val.source) & set(test.source) == set()
+
+    # --------------------- train-only BMU histograms ---------------------
+    # counts[u_x, u_y, class]
+    hist = np.zeros((W, H, len(CLASSES)), dtype=np.float64)
+
+    cls_to_idx = {c: i for i, c in enumerate(CLASSES)}
+    for _, r in train.iterrows():
+        hist[r.bmu_x, r.bmu_y, cls_to_idx[r.label]] += 1.0
+
+    support = hist.sum(axis=2)
+    # simple neighborhood smoothing (3x3 box) to reduce fragmentation
+
+    def smooth3(arr):
+        pad = np.pad(arr, ((1, 1), (1, 1), (0, 0)), mode='edge')
+        out = np.empty_like(arr)
+        for i in range(arr.shape[0]):
+            for j in range(arr.shape[1]):
+                window = pad[i:i+3, j:j+3, :]
+                out[i, j, :] = window.sum(axis=(0, 1))
+        return out
+
+    # After building train-only hist: hist[x,y,c]
+    # per-class totals in train
+    class_counts = hist.sum(axis=(0, 1))
+    w = class_counts.sum() / (len(CLASSES) * (class_counts + 1e-9))  # inverse frequency
+    hist_bal = hist * w.reshape(1, 1, -1)
+
+    hist_s = smooth3(hist_bal)
+
+    # Laplace smoothing → posteriors per BMU
+    post = (hist_s + ALPHA)
+    post /= post.sum(axis=2, keepdims=True)
+
+    # per-cell purity after smoothing
+    purity = post.max(axis=2)
+    support_s = hist_s.sum(axis=2)
+
+    # --------------------- predict with abstention ---------------------
+    def predict_df(dfin):
+        y_true, y_pred, y_conf, abstain = [], [], [], []
+        for _, r in dfin.iterrows():
+            px, py = int(r.bmu_x), int(r.bmu_y)
+
+            # if cell unseen in train, force abstain
+            if support_s[px, py] == 0:
+                y_pred.append(None)
+                y_conf.append(0.0)
+                abstain.append(True)
+                y_true.append(r.label)
+                continue
+
+            # posterior over classes for this BMU (after prior-correction + smoothing)
+            p = post[px, py, :]
+            # ---- margin computation (efficient, no full sort) ----
+            top2 = np.partition(p, -2)[-2:]     # two largest probs, unsorted
+            margin = float(top2.max() - top2.min())
+            conf = float(p.max())
+            pred_idx = int(p.argmax())
+
+            # your existing rules
+            cell_support = float(support_s[px, py])
+            is_abstain = (cell_support < MIN_SUPPORT) or (
+                purity[px, py] < MIN_PURITY)
+
+            # add margin rule
+            is_abstain |= (margin < MARGIN)
+
+            y_pred.append(CLASSES[pred_idx] if not is_abstain else None)
+            y_conf.append(conf)
+            abstain.append(is_abstain)
+            y_true.append(r.label)
+        return pd.DataFrame({"true": y_true, "pred": y_pred, "conf": y_conf, "abstain": abstain})
+
+    # {"QSO":0,"YSO":1,"Star":2} in your order
+    IDX = {c: i for i, c in enumerate(CLASSES)}
+
+    def predict_hier(dfin):
+        rows = []
+        for _, r in dfin.iterrows():
+            x, y = int(r.bmu_x), int(r.bmu_y)
+            if support_s[x, y] == 0:
+                rows.append((r.label, None, 0.0, True))
+                continue
+
+            p = post[x, y, :].astype(float)
+            supp = float(support_s[x, y])
+            pur = float(purity[x, y])
+
+            abst = (supp < MIN_SUPPORT) or (pur < MIN_PURITY)
+
+            # --- Stage 1: QSO vs Stellar ---
+            p_qso = p[IDX["QSO"]]
+            p_yso = p[IDX["YSO"]]
+            p_star = p[IDX["Star"]]
+            p_stel = p_yso + p_star
+
+            if not abst and (p_qso >= TAU_QSO) and ((p_qso - p_stel) >= MARGIN_QSO):
+                pred, conf = "QSO", float(p_qso)
+            else:
+                # --- Stage 2: YSO vs Star (renormalize inside stellar branch) ---
+                if p_stel <= 1e-12:
+                    pred, conf, abst = None, 0.0, True
+                else:
+                    py = p_yso / p_stel
+                    ps = p_star / p_stel
+                    # top-2 margin within {YSO, Star}
+                    margin2 = abs(py - ps)
+                    if abst or (margin2 < MARGIN_STELLAR):
+                        pred, conf, abst = None, max(py, ps), True
+                    else:
+                        pred, conf = ("YSO", py) if py >= ps else ("Star", ps)
+
+            rows.append((r.label, pred, conf, abst))
+
+        return pd.DataFrame(rows, columns=["true", "pred", "conf", "abstain"])
+
+    def predict_hier_adaptive(dfin):
+        rows = []
+        for _, r in dfin.iterrows():
+            x, y = int(r.bmu_x), int(r.bmu_y)
+
+            # unseen BMU -> abstain
+            if support_s[x, y] == 0:
+                rows.append((r.label, None, 0.0, True))
+                continue
+
+            p = post[x, y, :].astype(float)          # p over [QSO, YSO, Star]
+            sup = float(support_s[x, y])
+            pur = float(purity[x, y])
+
+            # global gates
+            abst = (sup < MIN_SUPPORT) or (pur < MIN_PURITY)
+            if abst:
+                rows.append((r.label, None, p.max(), True))
+                continue
+
+            # ----- Stage 1: QSO vs Stellar -----
+            p_qso = p[IDX["QSO"]]
+            p_yso = p[IDX["YSO"]]
+            p_star = p[IDX["Star"]]
+            p_stel = p_yso + p_star
+
+            if (p_qso >= TAU_QSO) and ((p_qso - p_stel) >= MARGIN_QSO):
+                rows.append((r.label, "QSO", float(p_qso), False))
+                continue
+
+            # ----- Stage 2: YSO vs Star (renormalize inside stellar) -----
+            if p_stel <= 1e-12:
+                rows.append((r.label, None, 0.0, True))
+                continue
+
+            py = p_yso / p_stel
+            ps = p_star / p_stel
+
+            # adaptive margin based on BMU purity
+            th_stellar = BASE_STELLAR + K_STELLAR * (1.0 - pur)
+            # clamp to reasonable bounds
+            if th_stellar < STELLAR_MIN:
+                th_stellar = STELLAR_MIN
+            if th_stellar > STELLAR_MAX:
+                th_stellar = STELLAR_MAX
+
+            if abs(py - ps) < th_stellar:
+                rows.append((r.label, None, max(py, ps), True))
+            else:
+                if py >= ps:
+                    rows.append((r.label, "YSO", float(py), False))
+                else:
+                    rows.append((r.label, "Star", float(ps), False))
+
+        return pd.DataFrame(rows, columns=["true", "pred", "conf", "abstain"])
+
+    from typing import List, Dict, Any
+
+    # ---------- Generic, class-agnostic predictor (single function) ----------
+    # Inputs required in scope: post, support_s, purity            (from your train-only histograms)
+    #                            CLASSES (list of labels, dynamic) e.g., ["QSO","YSO","Star"] or +["XrayBin"]
+
+    def predict_tree(dfin: pd.DataFrame, classes: List[str], params: Dict[str, Any]) -> pd.DataFrame:
+        IDX = {c: i for i, c in enumerate(classes)}
+
+        MIN_SUPPORT = params.get("MIN_SUPPORT", 5)
+        MIN_PURITY = params.get("MIN_PURITY", 0.55)
+
+        # ---- Stage-0: optional one-vs-rest gates (list of dicts)
+        # e.g., [{"label":"XrayBin","TAU":0.60,"MARGIN":0.10}]
+        stage0 = params.get("stage0", [])
+
+        # ---- Anchor split (label vs group)
+        # e.g., {"label":"QSO","TAU":0.60,"MARGIN":0.10,"right_group":["YSO","Star"]}
+        anchor = params.get("anchor", None)
+
+        # ---- Inside-group decision (adaptive binary margin)
+        # e.g., {"group":["YSO","Star"], "BASE":0.12,"K":0.30,"MIN":0.08,"MAX":0.50}
+        adapt = params.get("adapt", None)
+
+        rows = []
+        for _, r in dfin.iterrows():
+            x, y = int(r.bmu_x), int(r.bmu_y)
+
+            # unseen BMU
+            if support_s[x, y] == 0:
+                rows.append((r.label, None, 0.0, True))
+                continue
+
+            p = post[x, y, :].astype(float)
+            sup = float(support_s[x, y])
+            pur = float(purity[x, y])
+
+            # global gates
+            if (sup < MIN_SUPPORT) or (pur < MIN_PURITY):
+                rows.append((r.label, None, p.max(), True))
+                continue
+
+            # ---- Stage-0: try any declared one-vs-rest classes (if present)
+            fired = False
+            for gate in stage0:
+                lbl = gate["label"]
+                if lbl in IDX:
+                    p_new = p[IDX[lbl]]
+                    p_rest = 1.0 - p_new
+                    if (p_new >= gate.get("TAU", 0.60)) and ((p_new - p_rest) >= gate.get("MARGIN", 0.10)):
+                        rows.append((r.label, lbl, float(p_new), False))
+                        fired = True
+                        break
+            if fired:
+                continue
+
+            # ---- Anchor split: label vs group (e.g., QSO vs Stellar)
+            # If not provided or not present in CLASSES, skip to final decision
+            if anchor and (anchor["label"] in IDX):
+                left_lbl = anchor["label"]
+                right_lbls = [g for g in anchor.get(
+                    "right_group", []) if g in IDX]
+                # <— convert labels to integer indices
+                right_idx = [IDX[g] for g in right_lbls]
+
+                p_left = float(p[IDX[left_lbl]])
+                p_right = float(p[right_idx].sum()) if len(
+                    right_idx) else 0.0  # <— OK now
+
+                if (p_left >= anchor.get("TAU", 0.60)) and ((p_left - p_right) >= anchor.get("MARGIN", 0.10)):
+                    rows.append((r.label, left_lbl, p_left, False))
+                    continue
+
+                # ---- Inside right group: adaptive binary (if specified and 2 labels)
+                if adapt:
+                    grp_lbls = [g for g in adapt.get("group", []) if g in IDX]
+                    if len(grp_lbls) == 2:
+                        g1, g2 = grp_lbls
+                        g1i, g2i = IDX[g1], IDX[g2]
+                        denom = float(p[[g1i, g2i]].sum())
+                        if denom <= 1e-12:
+                            rows.append((r.label, None, 0.0, True))
+                            continue
+
+                        pg1 = float(p[g1i] / denom)
+                        pg2 = float(p[g2i] / denom)
+
+                        base = adapt.get("BASE", 0.12)
+                        k = adapt.get("K", 0.30)
+                        tmin = adapt.get("MIN", 0.08)
+                        tmax = adapt.get("MAX", 0.50)
+                        th = max(tmin, min(base + k*(1.0 - pur), tmax))
+
+                        if abs(pg1 - pg2) < th:
+                            rows.append((r.label, None, max(pg1, pg2), True))
+                        else:
+                            if pg1 >= pg2:
+                                rows.append((r.label, g1, pg1, False))
+                            else:
+                                rows.append((r.label, g2, pg2, False))
+                        continue
+                    # if group is not exactly 2 classes, fall through to argmax
+            # ---- Fallback: plain argmax over all classes (rarely needed)
+            pred_idx = int(p.argmax())
+            rows.append((r.label, classes[pred_idx], float(p.max()), False))
+
+        return pd.DataFrame(rows, columns=["true", "pred", "conf", "abstain"])
+
+    val_res = predict_df(val)
+    val_res_hier = predict_hier(val)
+    val_res_adapt = predict_hier_adaptive(val)
+    val_res_tree = predict_tree(val, CLASSES, params)
+
+    # --------- convenience reporter ----------
+
+    def report(res, name):
+        cov = 1.0 - res["abstain"].mean()
+        kept = res[~res.abstain]
+        print(f"\n=== {name} ===")
+        print(f"Coverage: {cov:.3f} ({len(kept)}/{len(res)})")
+        if len(kept) > 0:
+            print(classification_report(
+                kept["true"], kept["pred"], labels=CLASSES, digits=3))
+            print("Confusion matrix (kept only):\n", confusion_matrix(
+                kept["true"], kept["pred"], labels=CLASSES))
+
+    report(val_res,  "Validation")
+    report(val_res_hier, "Validation Hier")
+    # After tuning MIN_SUPPORT / MIN_PURITY on val, lock them and then:
+    # report(test_res, "Test")
+    # --------------------- run on val/test ---------------------
+    report(val_res_adapt, "Validation (Adaptive Hier)")
+    # (after tuning on val, freeze thresholds and call report(test_res_adapt, "Test"))
+    report(val_res_tree, "Validation (Tree)")
+    '''
+    from itertools import product
+
+    def eval_with(th_support, th_purity, th_margin):
+        global MIN_SUPPORT, MIN_PURITY, MARGIN
+        MIN_SUPPORT, MIN_PURITY, MARGIN = th_support, th_purity, th_margin
+        res = predict_df(val)
+        kept = res[~res.abstain]
+        from sklearn.metrics import f1_score
+        macro_f1 = f1_score(
+            kept["true"], kept["pred"], labels=CLASSES, average="macro") if len(kept) else 0.0
+        coverage = 1.0 - res["abstain"].mean()
+        return macro_f1, coverage
+
+    grid_support = [5, 8, 10]
+    grid_purity = [0.60, 0.65, 0.70]
+    grid_margin = [0.10, 0.15, 0.20]
+
+    best = None
+    for s, p, m in product(grid_support, grid_purity, grid_margin):
+        f1, cov = eval_with(s, p, m)
+        if cov >= 0.65:  # coverage floor you want
+            score = f1   # optimize macro-F1 under the coverage constraint
+            best = max(best or (-1, 0, 0, 0), (score, s, p, m))
+
+    print("Best (macro-F1 | MIN_SUPPORT, MIN_PURITY, MARGIN):", best)
+
+    '''    # Create a mapping from positions to classes
     neuron_class_map = defaultdict(list)
     for id_, pos, cls in zip(classified_ids, classified_positions, classified_classes):
         neuron_class_map[pos].append(cls)

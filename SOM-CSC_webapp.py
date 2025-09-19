@@ -171,7 +171,7 @@ st.session_state.df_index.columns = st.session_state.df_index.columns.str.replac
     '_log_norm', '')
 
 # GMM_cluster_labels = st.session_state.df['cluster']
-st.session_state.simbad_type = 'otype'  # otype
+st.session_state.simbad_type = 'main_type'  # otype
 main_type = st.session_state.raw_df[st.session_state.simbad_type]
 # default_main_type = ['QSO', 'AGN', 'Seyfert_1', 'Seyfert_2', 'HMXB',
 #                     'LMXB', 'XB', 'YSO', 'TTau*', 'Orion_V*']
@@ -1781,6 +1781,9 @@ if st.session_state.SOM_loaded:
                 if dataset_choice == 'Use the main dataset':
                     dataset_toclassify = st.session_state.df_index[pd.isna(
                         st.session_state.raw_df[st.session_state.simbad_type])]
+                    # now extract the dataset that already have a cross-match
+                    dataset_crossmatched = st.session_state.df_index[pd.notna(
+                        st.session_state.raw_df[st.session_state.simbad_type])]
                 elif dataset_choice == 'Upload a new dataset':
                     if st.session_state.SOM_loaded:
                         uploaded_file = st.file_uploader(
@@ -1800,6 +1803,7 @@ if st.session_state.SOM_loaded:
 
                 simbad_dataset = st.session_state.raw_df[pd.notna(
                     st.session_state.raw_df[st.session_state.simbad_type])]
+
                 SIMBAD_classes = set(
                     st.session_state.raw_df[st.session_state.simbad_type])
 
