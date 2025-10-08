@@ -1525,6 +1525,21 @@ if st.session_state.SOM_loaded:
                         default=['mean'],
                         max_selections=3,
                         help='Select up to 3 scaling methods to display side by side')
+
+                    main_type_counts = main_type.value_counts()
+                    default_main_type_counts = []
+                    for default in default_main_type:
+                        default_main_type_counts.append(
+                            f"{default} [{main_type_counts[default]}]")
+                    sorted_main_type = [f"{name} [{count}]" for name,
+                                        count in main_type_counts.items()]
+
+                    main_type_ = st.multiselect(
+                        'Main type [Number of detections]', sorted_main_type, default_main_type_counts)
+                    main_type_ = [mt.split(' [')[0] for mt in main_type_]
+                    strokeWidth_enhanced = st.slider(
+                        'Stroke Width Enhanced', 1.0, 5.0, 3.0, help='Stroke Width Enhanced')
+
                     st.write(
                         "###### Please click the 'Show Plot' button after choosing the dataset type or to display the map, in order to refresh the view.")
 
@@ -1597,6 +1612,10 @@ if st.session_state.SOM_loaded:
             var = project_feature(st.session_state.som, X,
                                   st.session_state.raw_df[feature])
 
+            if main_type_ is not None:
+                category_map = project_feature(
+                    st.session_state.som, X, st.session_state.raw_df[st.session_state.simbad_type], valid_values=main_type_)
+
             # Precompute all scaling metrics for global scale initialization
 
             precompute_feature_scale_ranges(var, feature)
@@ -1616,7 +1635,7 @@ if st.session_state.SOM_loaded:
             else:
                 create_multi_features_plot(
                     var, scaling_options, type_option, color_scheme,
-                    feature, st.session_state.som.topology
+                    feature, st.session_state.som.topology, category_map, strokeWidth_enhanced
                 )
 
         elif (st.session_state.feature_viz_dataset_choice == 'Upload a new dataset' and
@@ -1713,68 +1732,104 @@ if st.session_state.SOM_loaded:
         if enable_classification:
             with st.form(key='classification_form'):
                 with st.expander("See explanation"):
-                    st.write("This tool provides the functionality to classify detections that lack a cross-match in the SIMBAD dataset or belong to a new set of detections that can be uploaded (See below for more details on this). Classification is performed at two levels:")
-
-                    st.write("1. **Central Neuron Classification**: For every detection, the Best Matching Unit (BMU) is identified, and the most frequent class within that neuron is assigned. Users can set thresholds for:")
                     st.write(
-                        """
-                        <ul style="margin-left: 20px;">
-                            <li>The minimum number of detections that the top 3 classes within the neuron must contain.</li>
-                            <li>The minimum percentage of detections that the majority class must have relative to the top 3 classes within the neuron to be classified.</li>
-                        </ul>
-                        """,
-                        unsafe_allow_html=True
+                        "This tool classifies detections with a trained SOM. It’s designed for items without a SIMBAD cross-match or for new uploads."
                     )
 
-                    st.write("2. **Neighbor Neuron Classification**: Since neighboring neurons are close in the feature space, this method assigns the most frequent class among them. Parameters for this classification include:")
-                    st.write(
+                    st.write("### How it works (single pass)")
+                    st.markdown(
                         """
-                        <ul style="margin-left: 20px;">
-                            <li>The minimum number of detections from the top 3 classes required within each neuron to be included in the analysis.</li>
-                            <li>The minimum number of neighboring neurons that must share the same majority class.</li>
-                        </ul>
-                        """,
-                        unsafe_allow_html=True
+                - **BMU lookup:** each detection is mapped to its Best Matching Unit (BMU) on the SOM.
+                - **Dynamic neighborhood:** we look around the BMU with growing windows (e.g. 3×3, 5×5, 7×7) until we have **enough support**.
+                - **Probabilities:** from the neighborhood counts we compute class posteriors with mild **class reweighting** (optional) and **Laplace smoothing**.
+                - **Decision with abstain:** we assign the top class only if:
+                    - support ≥ **MIN_SUPPORT**
+                    - top-class probability (purity) ≥ **MIN_PURITY**
+                    - probability gap between top-2 classes ≥ **MARGIN**
+                Otherwise we **abstain**.
+                        """
                     )
-                    st.write(
-                        "Both classification methods are handled independently, and their results can be downloaded in the download section below.")
+
+                    st.write("### Main parameters")
+                    st.markdown(
+                        """
+                - **MIN_SUPPORT**: minimum effective examples in the chosen window  
+                - **MIN_PURITY**: minimum top-class posterior  
+                - **MARGIN**: minimum gap between top-2 posteriors  
+                - **WINDOWS**: neighborhood sizes tried in order (e.g. `[3,5,7]`)  
+                - **ALPHA** (Laplace), **GAMMA** (class reweighting)
+                        """
+                    )
+
+                    st.write("### Output columns (per detection)")
+                    st.markdown(
+                        """
+                - **pred** (class) · **conf** (top-class probability) · **abstain** (True/False)  
+                - **bmu_x, bmu_y** (BMU coords) · **support_eff** (evidence) · **purity** (top-class prob) · **window_k** (window used)
+                        """
+                    )
+
+                    st.write("### Upload format (CSV)")
+                    st.markdown(
+                        """
+                The file must be a **.csv** with the **same features used to train the SOM**, one row per detection.  
+                Include an **`id`** column if you want to keep identifiers in the outputs; no class column is needed.
+                        """
+                    )
+                    st.code(
+                        "id,f1,f2,f3,...,f11\n"
+                        "obj_001,0.12,1.5,3.4,...,0.07\n"
+                        "obj_002,0.08,1.2,3.1,...,0.05\n"
+                        "...\n",
+                        language="text",
+                    )
 
                     st.write(
-                        '⚠️ **The uploaded file must to be a .csv file with a specific structure:** ⚠️')
-                    st.write(
-                        'The columns should contain the features utilized for training the SOM.')
-                    st.write(
-                        '**A, B, C,**')
-                    st.write(
-                        '*x1, y1, z1*')
-                    st.write(
-                        '*x2, y2, z2*')
-                    st.write(
-                        '*...*')
-                    st.write(
-                        '*xN, yN, zN,*')
+                        "You can download the results (with predictions and confidences) from the download section below.")
                 dataset_toclassify = None
                 st.write("Apply classification")
+
                 parameters_classification = {}
                 # Set parameters
-                parameters_classification['confidence_threshold'] = st.slider(
-                    'Confidence Threshold', 0.0, 1.0, 0.5, help='Confidence Threshold')
-                # Minimum detections per neuron for central neuron
-                parameters_classification['min_detections_per_neuron'] = st.slider(
-                    'Minimum Detection x Neuron', 0, 100, 20, help='Number of detection on the BMU')
 
-                # Minimum confidence required in neighbor neurons
-                # not needed IMO
-                parameters_classification['neighbor_confidence_threshold'] = 0.
-                # Minimum detections per neuron for central neuron
-                parameters_classification['min_detections_per_neighbor'] = st.slider(
-                    'Minimum Detection x Neighbor Neuron', 0, 100, 20, help='Number of detection on the neighbors')
-                # Minimum number of neighbors that have the same class
-                parameters_classification['neighbor_majority_threshold'] = st.slider(
-                    'Minimum Number of Neighbor', 1, 6, 4, help='Minimum Number of Neighbor')
+                main_type_counts = main_type.value_counts()
+                default = ['QSO', 'YSO', 'Star']
+                default_main_type_counts = []
+                for default in default:
+                    default_main_type_counts.append(
+                        f"{default} [{main_type_counts[default]}]")
+                sorted_main_type = [f"{name} [{count}]" for name,
+                                    count in main_type_counts.items()]
 
-                som_map_id = download_activation_response(
-                    st.session_state.som, X_index)
+                main_type_selection = st.multiselect(
+                    'Classes', sorted_main_type, default=default_main_type_counts, help='Classes to classify')
+
+                parameters_classification['classes'] = [mt.split(' [')[0]
+                                                        for mt in main_type_selection]
+
+                parameters_classification['MIN_SUPPORT'] = st.slider(
+                    'Minimum Support', 0, 1000, 20, help='Minimum Support')
+                parameters_classification['MIN_PURITY'] = st.slider(
+                    'Minimum Purity', 0.0, 1.0, 0.55, help='Minimum Purity')
+                parameters_classification['MARGIN'] = st.slider(
+                    'Margin', 0.0, 0.5, 0.05, help='Margin')
+                parameters_classification['ALPHA'] = st.slider(
+                    'Alpha', 0.0, 3.0, 2.0, help='Alpha')
+                parameters_classification['GAMMA'] = st.slider(
+                    'Gamma', 0.0, 1.0, 0.5, help='Gamma')
+                parameters_classification['WINDOWS'] = st.multiselect(
+                    'Windows', [3, 5, 7], default=[3, 5, 7], help='Windows')
+
+                # Ensure "Other" is even considered
+                parameters_classification.setdefault('OTHER_LABEL', 'Other')
+
+                # Purity: from MIN_PURITY up to 1.0
+                parameters_classification['OTHER_PURITY_MIN'] = st.slider(
+                    'Other Purity Min', 0.0, 1.0, 0.5, help='Other Purity Min')
+
+                # Other Margin Min
+                parameters_classification['OTHER_MARGIN_MIN'] = st.slider(
+                    'Other Margin Min', 0.0, 0.5, 0.1, help='Other Margin Min')
 
                 dataset_choice = st.radio(
                     'Choose the dataset', ['Use the main dataset', 'Upload a new dataset'])
@@ -1810,37 +1865,211 @@ if st.session_state.SOM_loaded:
                 classify = st.form_submit_button('Get Classification')
 
                 if classify and dataset_toclassify is not None:
-                    assignments_central, assignments_neighbor, all_confidences_central, all_confidences_neighbor = get_classification(
-                        som_map_id, dataset_toclassify, simbad_dataset, SIMBAD_classes, parameters_classification, dim, st.session_state.som)
-                    # classify = False
-                    dataset_classified = update_dataset_to_classify(
-                        dataset_toclassify, assignments_central, assignments_neighbor)
+                    # Split st.session_state.df_index into with and without cross-match, then the one with a label
+                    dataset_toclassify_with_crossmatch = st.session_state.df_index[pd.notna(
+                        st.session_state.raw_df[st.session_state.simbad_type])]
+                    id_name_type_with_crossmatch = simbad_dataset[[
+                        "id", "name", st.session_state.simbad_type]]
 
-                    st.session_state.dataset_classified = dataset_classified[['id', 'assigned_class_central',
-                                                                              'confidence_central', 'assigned_class_neighbor', 'confidence_neighbor', 'is_classified']]
+                    dataset_toclassify_with_crossmatch = pd.merge(
+                        dataset_toclassify_with_crossmatch, id_name_type_with_crossmatch, on="id", how="left")
+
+                    # split it into train, val, test, but be cafeful to not have source leakage (use stratified group kfold)
+                    sgkf = StratifiedGroupKFold(
+                        n_splits=10, shuffle=True, random_state=42)
+                    fold = np.empty(
+                        len(dataset_toclassify_with_crossmatch), dtype=int)
+                    for k, (_, test_idx) in enumerate(sgkf.split(X=np.zeros(len(dataset_toclassify_with_crossmatch)), y=dataset_toclassify_with_crossmatch[st.session_state.simbad_type], groups=dataset_toclassify_with_crossmatch["name"])):
+                        fold[test_idx] = k
+                    dataset_toclassify_with_crossmatch["fold"] = fold
+                    train = dataset_toclassify_with_crossmatch[dataset_toclassify_with_crossmatch.fold.isin(
+                        {0, 1, 2, 3, 4, 5, 6})].copy()
+                    val = dataset_toclassify_with_crossmatch[dataset_toclassify_with_crossmatch.fold.isin({
+                        7})].copy()
+                    test = dataset_toclassify_with_crossmatch[dataset_toclassify_with_crossmatch.fold.isin({
+                        8, 9})].copy()
+
+                    assert set(train.name) & set(val.name) == set()
+                    assert set(train.name) & set(test.name) == set()
+                    assert set(val.name) & set(test.name) == set()
+
+                    TARGET = parameters_classification['classes']
+                    OTHER = 'Other'
+
+                    for d in (train, val, test):
+                        d.loc[:, 'label'] = np.where(d[st.session_state.simbad_type].isin(
+                            TARGET), d[st.session_state.simbad_type], OTHER)
+
+                    parameters_classification['classes'] = list(
+                        dict.fromkeys(TARGET + [OTHER]))
+
+                    # size of traim, val, test
+                    st.write(
+                        f"Size of train: {len(train)}, size of val: {len(val)}, size of test: {len(test)}")
+                    # and devided by classes
+                    st.write(
+                        f"Size of train by classes: {train['label'].value_counts()}")
+                    st.write(
+                        f"Size of val by classes: {val['label'].value_counts()}")
+                    st.write(
+                        f"Size of test by classes: {test['label'].value_counts()}")
+
+                    # append the two datasets using online the features columns to train the SOM and order by id
+                    train_x_Y = pd.concat(
+                        [train, dataset_toclassify]).sort_values(by="id")[st.session_state.selected_features].reset_index(drop=True).to_numpy()
+                    train_x_Y_index = pd.concat(
+                        [train, dataset_toclassify]).sort_values(by="id")[["id"] + st.session_state.selected_features].reset_index(drop=True).to_numpy()
+                    test_x_Y_index = test.sort_values(by="id")[
+                        ["id"] + st.session_state.selected_features].reset_index(drop=True).to_numpy()
+                    val_x_Y_index = val.sort_values(by="id")[
+                        ["id"] + st.session_state.selected_features].reset_index(drop=True).to_numpy()
+
+                    # add a loader to train the SOM
+                    with st.spinner('Training the SOM for classification...'):
+                        st.session_state.som_classification = train_som(train_x_Y, dim, dim, len(features), sigma,
+                                                                        learning_rate, iterations, topology, seed)
+                        # print QE and TE
+                        st.write(
+                            f"QE: {st.session_state.som_classification.quantization_error(train_x_Y)}")
+                        st.write(
+                            f"TE: {st.session_state.som_classification.topographic_error(train_x_Y)}")
+
+                    som_map_id_train = download_activation_response(
+                        st.session_state.som_classification, train_x_Y_index)
+                    som_map_id_test = download_activation_response(
+                        st.session_state.som_classification, test_x_Y_index)
+                    som_map_id_val = download_activation_response(
+                        st.session_state.som_classification, val_x_Y_index)
+
+                    '''
+                    with st.spinner('Getting classification analysis from splits...'):
+                        analysis_from_splits = get_classification_analysis_from_splits(
+                            som_map_id_train, som_map_id_val, som_map_id_test, train, val, test, parameters_classification, dim, st.session_state.som_classification)
+                    st.write(
+                        analysis_from_splits['best_by_floor'])
+                    '''
+
+                    out = get_classification(
+                        som_map_id_train, som_map_id_test, som_map_id_val, dataset_toclassify, dataset_toclassify_with_crossmatch, train, val, test, parameters_classification, dim, st.session_state.som_classification)
+
+                    # classify = False
+                    dataset_classified = out['predictions']
+
+                    st.session_state.dataset_classified = dataset_classified[['id', 'pred',
+                                                                              'conf', 'abstain']]
 
                     classification_results = describe_classified_dataset(
-                        dataset_classified, assignments_central, assignments_neighbor, all_confidences_central, all_confidences_neighbor)
+                        dataset_classified)
+
+                    def render_split_metrics(split_name: str, metrics: dict, classes: list[str]):
+                        if not metrics or metrics.get("confusion_matrix") is None:
+                            st.info(
+                                f"No {split_name.lower()} metrics available.")
+                            return
+
+                        cov = metrics["coverage"]
+                        macro_f1 = metrics["macro_f1"]
+                        kept = metrics["n_kept"]
+                        total = metrics["n_total"]
+                        per_class_f1 = metrics["per_class_f1"]
+
+                        st.subheader(f"{split_name} results")
+                        c1, c2, c3 = st.columns(3)
+                        with c1:
+                            st.metric(
+                                "Coverage", f"{cov:.3f}", help="Kept / total on this split")
+                        with c2:
+                            st.metric("Macro-F1", f"{macro_f1:.3f}")
+                        with c3:
+                            st.metric("Kept / Total", f"{kept} / {total}")
+
+                        # Per-class F1 table
+                        f1_df = pd.DataFrame(
+                            {"F1": per_class_f1}).reindex(classes)
+                        st.write("Per-class F1")
+                        st.dataframe(f1_df.style.format({"F1": "{:.3f}"}))
+
+                        # Confusion matrix (kept only)
+                        cm_df = pd.DataFrame(metrics["confusion_matrix"])
+                        # reorder rows/cols if needed
+                        cm_df = cm_df.reindex(index=[f"T:{c}" for c in classes],
+                                              columns=[f"P:{c}" for c in classes])
+                        st.write(
+                            "Confusion matrix (kept only — rows=true, cols=pred)")
+                        st.dataframe(cm_df)
+
+                        # Micro-F1 / accuracy on kept
+                        cm = cm_df.to_numpy()
+                        micro = (np.trace(cm) / cm.sum()
+                                 ) if cm.sum() > 0 else 0.0
+                        st.caption(f"Micro-F1 / Accuracy on kept: {micro:.3f}")
+
+                    # ===============================
+                    # Use it with your model outputs
+                    # ===============================
+
+                    # Assume you've already run:
+                    # out = get_classification(...)
+
+                    classes = out["params_used"]["classes"]
+
+                    # --- 1) Show VALIDATION first (always visible) ---
+                    st.header("Validation Evaluation")
+                    render_split_metrics("Validation", out.get(
+                        "val_metrics", {}), classes)
+
+                    # --- 2) TEST results: hidden by default ---
+                    with st.expander("Show TEST results (hidden by default)"):
+                        render_split_metrics("TEST", out.get(
+                            "test_metrics", {}), classes)
 
                     st.title("Summary of Classification Assignment")
 
                     st.header("Overview")
                     st.write("### Key Metrics")
                     st.write(
-                        f"**Total unclassified detections before assignment:** {classification_results['total_unclassified_before']}")
+                        f"**Total detections (before assignment):** {classification_results['total_unclassified_before']}")
                     st.write(
-                        f"**Number of detections assigned a class:** {classification_results['total_classified_rows']}")
+                        f"**Assigned (kept) predictions:** {classification_results['total_classified_rows']}")
                     st.write(
-                        f"**Number of detections remaining unclassified:** {classification_results['num_unclassified_after']}")
+                        f"**Abstained predictions:** {classification_results['num_unclassified_after']}")
                     st.write(
-                        f"**Percentage of detections assigned:** {classification_results['percentage_assigned']:.2f}%")
+                        f"**Coverage (kept/total):** {classification_results['coverage']:.3f}")
+                    st.write(
+                        f"**Percentage assigned:** {classification_results['percentage_assigned']:.2f}%")
 
-                    st.write("### Assignment Details")
-                    st.write(
-                        f"**Number of detections assigned by central neuron:** {classification_results['num_assigned_central']}")
-                    st.write(
-                        f"**Number of detections assigned by neighbor neurons:** {classification_results['num_assigned_neighbor']}")
+                    st.write("### Class distribution (kept only)")
 
+                    dist_df = pd.DataFrame({
+                        "count": classification_results["assigned_class_counts"],
+                        "percent": classification_results["assigned_class_percent"].round(2)
+                    })
+                    dist_df.index.name = "class"
+                    st.dataframe(dist_df)
+
+                    st.write("### Confidence by class (kept only)")
+                    st.dataframe(classification_results["confidence_by_class"])
+
+                    st.write("### Neighborhood diagnostics")
+                    # window usage (all vs kept)
+                    win_all = classification_results["window_k_counts_all"]
+                    win_kept = classification_results["window_k_counts_assigned"].reindex(
+                        win_all.index, fill_value=0)
+                    win_df = pd.DataFrame({"all": win_all, "kept": win_kept})
+                    win_df.index.name = "window_k"
+                    st.dataframe(win_df)
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write("Support stats (kept)")
+                        st.dataframe(
+                            classification_results["support_stats_assigned"])
+                    with col2:
+                        st.write("Purity stats (kept)")
+                        st.dataframe(
+                            classification_results["purity_stats_assigned"])
+
+                    # OLD
                     if classification_results['total_classified_rows'] != 0:
                         st.header("Classification Assignment Visualization")
 

@@ -13,6 +13,7 @@ import itertools
 # do delate after analysis
 from itertools import product
 from sklearn.metrics import f1_score, precision_recall_fscore_support, confusion_matrix, classification_report
+from classification import *
 
 
 # Global dictionary to store min/max values per feature and metric type
@@ -1244,7 +1245,7 @@ def scatter_plot_sources_hex(som, sources, raw_df, X, column_name, custom_colors
 
 '''
 def project_feature_sources(som, X, feature, sources):
-    
+
     #Returns a 2D map of lists containing the values of the external feature for each neuron of the SOM
     map = [[[None] for _ in range(som._weights.shape[1])]
            for _ in range(som._weights.shape[0])]
@@ -1966,7 +1967,7 @@ def category_plot_clustering(map):
     st.altair_chart(scatter_chart_sample, use_container_width=True)
 
 
-def features_plot_hex(_map, color_type, color_scheme, scaling='mean', flip=True, feature_name=None):
+def features_plot_hex(_map, color_type, color_scheme, scaling='mean', flip=True, feature_name=None, category_map=None, strokeWidth_enhanced=3.0):
     if flip:
         _map = list(map(list, zip(*_map)))
     '''
@@ -2040,6 +2041,57 @@ def features_plot_hex(_map, color_type, color_scheme, scaling='mean', flip=True,
     # Get the dimensions of the SOM grid
     grid_size = len(_map)
 
+    # ----------------- ONLY-CHANGE: robust class-presence flag from category_map ----------
+    # Treat a cell as "has class" ONLY if it contains at least one non-null/non-empty label.
+    has_class = None
+    if category_map is not None:
+        # Align category_map with the flipped orientation (if any), to match _map
+        cat_map_aligned = category_map
+        if flip:
+            cat_map_aligned = list(map(list, zip(*category_map)))
+
+        def _is_valid_label(v):
+            # None or NaN -> invalid
+            if v is None:
+                return False
+            try:
+                if isinstance(v, float) and np.isnan(v):
+                    return False
+            except Exception:
+                pass
+            # Empty/blank strings -> invalid
+            if isinstance(v, str):
+                return len(v.strip()) > 0
+            # Any other non-null object counts as a label
+            return True
+
+        def _cell_has_class(cell):
+            # Accept: list/tuple/ndarray of labels, or a single scalar label
+            if cell is None:
+                return False
+            if isinstance(cell, (list, tuple, np.ndarray, set)):
+                # True only if ANY element is a valid label
+                for v in cell:
+                    if _is_valid_label(v):
+                        return True
+                return False
+            return _is_valid_label(cell)
+
+        has_class = []
+        for _, r in np_map.iterrows():
+            y0 = int(r['y']) - 1
+            x0 = int(r['x']) - 1
+            try:
+                present = _cell_has_class(cat_map_aligned[y0][x0])
+            except Exception:
+                present = False
+            has_class.append(present)
+
+        np_map['has_class'] = has_class
+    else:
+        np_map['has_class'] = False
+    # --------------------------------------------------------------------------------------
+
     # Calculate the min/max values for this specific visualization
     local_min_value = np_map['value'][np_map['value'] > float(
         '-inf')].min() if not np_map['value'].empty else 0
@@ -2065,12 +2117,10 @@ def features_plot_hex(_map, color_type, color_scheme, scaling='mean', flip=True,
 
     # For log scale, find the smallest non-zero value if min_value is 0
     if color_type == "log" and min_value == 0:
-        # Filter out zeros and find the smallest positive value
         positive_values = np_map['value'][(np_map['value'] > 0)]
         if not positive_values.empty:
             min_value = positive_values.min()
         else:
-            # If there are no positive values, use a small positive number
             min_value = 0.01
             st.warning(
                 "No positive values found for log scale. Using default minimum value.")
@@ -2084,49 +2134,42 @@ def features_plot_hex(_map, color_type, color_scheme, scaling='mean', flip=True,
     y_domain = list(range(1, grid_size + 1))
 
     # Create tick values based on grid size (even/odd)
-    # Always include first and last number, then either even or odd numbers in between
     if grid_size % 2 == 0:  # Even grid size
-        tick_values = [1] + \
-            [i for i in range(2, grid_size + 1, 2)]  # Even numbers
+        tick_values = [1] + [i for i in range(2, grid_size + 1, 2)]
     else:  # Odd grid size
-        tick_values = [i for i in range(1, grid_size + 1, 2)]  # Odd numbers
+        tick_values = [i for i in range(1, grid_size + 1, 2)]
 
-    # Ensure the last number is always included
     if grid_size not in tick_values:
         tick_values.append(grid_size)
-
-    # Sort the tick values to ensure they're in order
     tick_values.sort()
 
     hexagon = "M0,-2.3094010768L2,-1.1547005384 2,1.1547005384 0,2.3094010768 -2,1.1547005384 -2,-1.1547005384Z"
-    c = alt.Chart(np_map).mark_point(shape=hexagon, size=size**2).encode(
+
+    # Base layer (unchanged appearance)
+    c_base = alt.Chart(np_map).mark_point(shape=hexagon, size=size**2).encode(
         x=alt.X('xFeaturePos:Q', title='',
-                # Extend domain slightly
                 scale=alt.Scale(domain=[0, grid_size + 1.5]),
                 axis=alt.Axis(
                     grid=False,
-                    # Set specific tick values
                     values=tick_values,
-                    tickOpacity=1,  # Make ticks visible
-                    domainOpacity=1,  # Make domain line visible
-                    labels=True,  # Ensure labels are shown
-                    labelOverlap=False  # Prevent label overlap
+                    tickOpacity=1,
+                    domainOpacity=1,
+                    labels=True,
+                    labelOverlap=False
                 )
                 ),
         y=alt.Y('y:Q',
                 sort=alt.EncodingSortField('y', order='descending'),
                 title='',
-                # Extend domain slightly
                 scale=alt.Scale(domain=[0, grid_size + 1.5]),
                 axis=alt.Axis(
                     grid=False,
                     labelPadding=20,
-                    # Set specific tick values
                     values=tick_values,
-                    tickOpacity=1,  # Make ticks visible
-                    domainOpacity=1,  # Make domain line visible
-                    labels=True,  # Ensure labels are shown
-                    labelOverlap=False  # Prevent label overlap
+                    tickOpacity=1,
+                    domainOpacity=1,
+                    labels=True,
+                    labelOverlap=False
                 )
                 ),
         color=alt.Color('value:Q', scale=alt.Scale(
@@ -2146,7 +2189,32 @@ def features_plot_hex(_map, color_type, color_scheme, scaling='mean', flip=True,
         strokeWidth=alt.value(1.0)
     ).transform_calculate(
         xFeaturePos='(datum.y%2)/2 + datum.x-.5'
-    ).properties(
+    )
+
+    # Thicker border where any class is present
+    c_outline = alt.Chart(np_map[np_map['has_class'] == True]).mark_point(
+        shape=hexagon, size=size**2
+    ).encode(
+        x=alt.X('xFeaturePos:Q', title='',
+                scale=alt.Scale(domain=[0, grid_size + 1.5]),
+                axis=alt.Axis(grid=False, values=tick_values, tickOpacity=1,
+                              domainOpacity=1, labels=True, labelOverlap=False)
+                ),
+        y=alt.Y('y:Q',
+                sort=alt.EncodingSortField('y', order='descending'),
+                title='',
+                scale=alt.Scale(domain=[0, grid_size + 1.5]),
+                axis=alt.Axis(grid=False, labelPadding=20, values=tick_values,
+                              tickOpacity=1, domainOpacity=1, labels=True, labelOverlap=False)
+                ),
+        fill=alt.value('transparent'),
+        stroke=alt.value('black'),
+        strokeWidth=alt.value(strokeWidth_enhanced)
+    ).transform_calculate(
+        xFeaturePos='(datum.y%2)/2 + datum.x-.5'
+    )
+
+    c = (c_base + c_outline).properties(
         height=750,
         width=600,
         title={
@@ -2506,63 +2574,90 @@ def features_plot(_map, color_type, color_scheme, scaling='mean', flip=True, fea
     st.altair_chart(c, use_container_width=True)
 
 
-def describe_classified_dataset(dataset_classified, assignments_central, assignments_neighbor, all_confidences_central=None, all_confidences_neighbor=None):
-    results = {}
+def describe_classified_dataset(dataset_classified, classes=None):
+    """
+    Summarize a single-pass SOM classification.
 
-    assignments_central_df = pd.DataFrame(assignments_central)
-    assignments_neighbor_df = pd.DataFrame(assignments_neighbor)
+    dataset_classified: DataFrame with columns
+        id, bmu_x, bmu_y, pred, conf, abstain, support_eff, purity, window_k
+    classes: optional list of class names to reindex counts (shows 0s)
 
-    # Process all confidence values if provided
-    if all_confidences_central:
-        all_confidences_central_df = pd.DataFrame(all_confidences_central)
-        results['all_confidences_central'] = all_confidences_central_df
+    Returns dict of pandas objects and scalars.
+    """
+
+    df = dataset_classified.copy()
+
+    # --- basic counts / coverage
+    total = int(len(df))
+    assigned_mask = (~df["abstain"]) & df["pred"].notna()
+    num_assigned = int(assigned_mask.sum())
+    num_abstained = total - num_assigned
+    coverage = (num_assigned / total) if total else 0.0
+
+    # --- class distribution on kept predictions
+    if num_assigned:
+        assigned_counts = df.loc[assigned_mask, "pred"].value_counts()
+        if classes is not None:
+            assigned_counts = assigned_counts.reindex(classes, fill_value=0)
+        assigned_perc = (assigned_counts / max(num_assigned, 1)) * 100.0
+        conf_assigned = df.loc[assigned_mask, "conf"]
+        conf_by_class = (
+            df.loc[assigned_mask, ["pred", "conf"]]
+              .groupby("pred")["conf"].describe()
+              .reindex(classes) if classes is not None else
+            df.loc[assigned_mask, ["pred", "conf"]].groupby("pred")[
+                "conf"].describe()
+        )
     else:
-        results['all_confidences_central'] = pd.DataFrame()
+        assigned_counts = pd.Series(dtype="int64")
+        assigned_perc = pd.Series(dtype="float64")
+        conf_assigned = pd.Series(dtype="float64")
+        conf_by_class = pd.DataFrame()
 
-    if all_confidences_neighbor:
-        all_confidences_neighbor_df = pd.DataFrame(all_confidences_neighbor)
-        results['all_confidences_neighbor'] = all_confidences_neighbor_df
-    else:
-        results['all_confidences_neighbor'] = pd.DataFrame()
+    # --- window usage and neighborhood evidence
+    window_all = df["window_k"].value_counts().sort_index(
+    ) if "window_k" in df else pd.Series(dtype="int64")
+    window_assigned = (
+        df.loc[assigned_mask, "window_k"].value_counts().sort_index(
+        ) if "window_k" in df else pd.Series(dtype="int64")
+    )
 
-    # Step 2: Count the number of classified rows
-    results['total_classified_rows'] = dataset_classified['is_classified'].sum()
+    # --- support & purity summaries (kept vs abstained)
+    def _desc(s):
+        return s.describe() if len(s) else pd.Series(dtype="float64")
 
-    # Total number of unclassified detections before assignment
-    results['total_unclassified_before'] = len(dataset_classified)
+    support_assigned = _desc(df.loc[assigned_mask, "support_eff"]
+                             ) if "support_eff" in df else pd.Series(dtype="float64")
+    support_abstain = _desc(df.loc[~assigned_mask, "support_eff"]
+                            ) if "support_eff" in df else pd.Series(dtype="float64")
+    purity_assigned = _desc(
+        df.loc[assigned_mask, "purity"]) if "purity" in df else pd.Series(dtype="float64")
+    purity_abstain = _desc(df.loc[~assigned_mask, "purity"]
+                           ) if "purity" in df else pd.Series(dtype="float64")
 
-    # Number of detections that were assigned a class using the same neuron
-    results['num_assigned_central'] = len(assignments_central_df)
+    results = {
+        # headline numbers (preserve old key names where sensible)
+        "total_unclassified_before": total,
+        "total_classified_rows": num_assigned,   # == number of kept predictions
+        "num_assigned": num_assigned,
+        "num_unclassified_after": num_abstained,
+        "percentage_assigned": coverage * 100.0,
+        "coverage": coverage,
 
-    # Number of detections that were assigned a class using neighbor neurons
-    results['num_assigned_neighbor'] = len(assignments_neighbor_df)
+        # distributions
+        "assigned_class_counts": assigned_counts,
+        "assigned_class_percent": assigned_perc,
+        "confidence_assigned": conf_assigned,   # vector (for histograms)
+        "confidence_by_class": conf_by_class,   # describe() per class
 
-    # Number of detections remaining unclassified
-    results['num_unclassified_after'] = results['total_unclassified_before'] - \
-        results['total_classified_rows']
-
-    # Percentage of detections assigned
-    results['percentage_assigned'] = (
-        results['total_classified_rows'] / results['total_unclassified_before']) * 100
-
-    if {'assigned_class_central', 'confidence_central'}.issubset(assignments_central_df.columns):
-        # Distribution of assigned classes central
-        results['assigned_class_counts_central'] = assignments_central_df['assigned_class_central'].value_counts()
-        # Distribution of confidence levels central
-        results['confidence_levels_central'] = assignments_central_df['confidence_central']
-    else:
-        results['assigned_class_counts_central'] = pd.Series(dtype='int64')
-        results['confidence_levels_central'] = pd.Series(dtype='float64')
-
-    if {'assigned_class_neighbor', 'confidence_neighbor'}.issubset(assignments_neighbor_df.columns):
-        # Distribution of assigned classes neighbor
-        results['assigned_class_counts_neighbor'] = assignments_neighbor_df['assigned_class_neighbor'].value_counts()
-        # Distribution of confidence levels neighbor
-        results['confidence_levels_neighbor'] = assignments_neighbor_df['confidence_neighbor']
-    else:
-        results['assigned_class_counts_neighbor'] = pd.Series(dtype='int64')
-        results['confidence_levels_neighbor'] = pd.Series(dtype='float64')
-
+        # neighborhood diagnostics
+        "window_k_counts_all": window_all,
+        "window_k_counts_assigned": window_assigned,
+        "support_stats_assigned": support_assigned,
+        "support_stats_abstained": support_abstain,
+        "purity_stats_assigned": purity_assigned,
+        "purity_stats_abstained": purity_abstain,
+    }
     return results
 
 
@@ -2600,7 +2695,6 @@ def update_dataset_to_classify(dataset_toclassify, assignments_central, assignme
     return dataset_toclassify
 
 
-'''
 def get_classification_analysis_tree(
     som_map_id,
     dataset_toclassify,
@@ -2659,12 +2753,19 @@ def get_classification_analysis_tree(
         df["bmu_y"] = [y for _, y in bxy]
         return df
 
-    def smooth3(arr):
-        pad = np.pad(arr, ((1, 1), (1, 1), (0, 0)), mode="edge")
+    def smooth_box(arr, k=3, mode='edge'):
+        """
+        k x k box sum (k must be odd). Works like your smooth3 but generalized.
+        """
+        assert k % 2 == 1, "k must be odd"
+        r = k // 2
+        pad = np.pad(arr, ((r, r), (r, r), (0, 0)), mode=mode)
         out = np.empty_like(arr)
-        for i in range(arr.shape[0]):
-            for j in range(arr.shape[1]):
-                out[i, j, :] = pad[i:i+3, j:j+3, :].sum(axis=(0, 1))
+        H, W, _ = arr.shape
+        for i in range(H):
+            for j in range(W):
+                window = pad[i:i+k, j:j+k, :]
+                out[i, j, :] = window.sum(axis=(0, 1))
         return out
 
     def build_repr(train_df, classes, W, H, alpha=1.0, balance=True):
@@ -2677,7 +2778,7 @@ def get_classification_analysis_tree(
             class_counts = hist.sum(axis=(0, 1))
             w = class_counts.sum() / (len(classes) * (class_counts + 1e-9))
             hist = hist * w.reshape(1, 1, -1)
-        hist_s = smooth3(hist)
+        hist_s = smooth_box(hist, k=3, mode='edge')
         post = hist_s + alpha
         post /= post.sum(axis=2, keepdims=True)
         purity = post.max(axis=2)
@@ -2980,362 +3081,598 @@ def get_classification_analysis_tree(
     }
 
 
-def get_classification_analysis(som_map_id, dataset_toclassify, simbad_dataset, SIMBAD_classes, parameters_classification, dim, som):
-    id_to_pos = {}
-    for (i, j), ids in som_map_id.items():
-        for id_ in ids:
-            id_to_pos[id_] = (i, j)
+def get_classification_analysis_from_splits(
+    som_map_id_train,     # dict[(i,j)] -> [ids] for TRAIN ids
+    som_map_id_val,       # dict[(i,j)] -> [ids] for VAL ids
+    som_map_id_test,      # dict[(i,j)] -> [ids] for TEST ids
+    # DataFrame with columns: ["id","name","main_type", ...]
+    train,
+    val,                  # same cols as train
+    test,                 # same cols as train
+    parameters_classification,
+    dim,                  # SOM width/height (square)
+    show_test=False       # keep prints for TEST hidden unless asked
+):
+    """
+    Protocol:
+      • SOM was trained earlier on (train_x + Y) only, then frozen.
+      • BMUs for train/val/test were computed with that frozen SOM and passed in here.
+      • We build hist/posteriors from TRAIN labels only, grid-search on VAL once,
+        select best per coverage floor in {0.5,0.6,0.7,0.8,0.9}, and evaluate on TEST.
+    Returns:
+      {
+        "classes": [...],
+        "windows": [...],
+        "val_runs": [ {params, coverage, macro_f1, per_class_f1, n_kept, n_total}, ... ],
+        "best_by_floor": {
+            0.5: { "params": {...}, "val_metrics": {...}, "test_metrics": {...}, "val_confusion": df, "test_confusion": df or None },
+            ...
+        }
+      }
+    """
+    import numpy as np
+    import pandas as pd
+    from itertools import product
+    from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
 
-    # Extract IDs, positions and classes for classified detections
-    classified_ids = simbad_dataset['id'].tolist()
-    classified_positions = [id_to_pos[id_]
-                            for id_ in classified_ids if id_ in id_to_pos]
-    classified_classes = simbad_dataset[st.session_state.simbad_type].tolist()
+    # --------------------- params & classes ---------------------
+    params = parameters_classification or {}
+    CLASSES = list(params.get("classes", ["QSO", "YSO", "Star", "Other"]))
+    OTHER_LABEL = params.get("OTHER_LABEL", "Other")
+    WINDOWS = list(params.get("WINDOWS", [3, 5, 7]))
+    WINDOWS = sorted({int(k) for k in WINDOWS if int(k) %
+                     2 == 1 and int(k) >= 3})
 
-    source_id = simbad_dataset['name'].tolist()
+    '''
+    GRID = {
+        "MIN_SUPPORT": params.get("GRID_MIN_SUPPORT", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
+        "MIN_PURITY":  params.get("GRID_MIN_PURITY",  [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0]),
+        "MARGIN":      params.get("GRID_MARGIN",      [0.05, 0.08, 0.10, 0.12, 0.15, 0.18, 0.20, 0.22, 0.25]),
+        "ALPHA":       params.get("GRID_ALPHA",       [0.5, 1.0, 2.0]),
+        "GAMMA":       params.get("GRID_GAMMA",       [0.0, 0.3, 0.5, 0.7, 1.0]),
+        "OTHER_PURITY_MIN": params.get("GRID_OTHER_PURITY_MIN", [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]),
+        "OTHER_MARGIN_MIN": params.get("GRID_OTHER_MARGIN_MIN", [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]),
+    }
+    '''
 
-    # print distribution of classes
-    dataset = pd.DataFrame({
-        "source": source_id,
-        "det_id": classified_ids,
-        "bmu": classified_positions,
-        "label": classified_classes,
-    })
+    GRID = {
+        # Support: always 1 in your winners; keep 2 as a guard-rail
+        "MIN_SUPPORT": [1],
 
-    if "bmu_x" not in dataset.columns or "bmu_y" not in dataset.columns:
-        def _to_xy(v):
-            # accepts (x,y), [x,y], {"x":..,"y":..}, or "x,y"
-            if isinstance(v, (tuple, list)) and len(v) == 2:
-                return int(v[0]), int(v[1])
-            if isinstance(v, dict):
-                return int(v.get("x")), int(v.get("y"))
-            if isinstance(v, str):
-                x, y = v.replace("(", "").replace(")", "").split(",")
-                return int(float(x)), int(float(y))
-            raise ValueError(f"Unrecognized BMU format: {v}")
+        # Purity: sweet spot ~0.4–0.5; include 0.35 and 0.3 for high-coverage regimes
+        # and 0.55 for a tad more precision at lower coverage floors.
+        "MIN_PURITY":  [0.2, 0.30, 0.35, 0.40, 0.45],
 
-        bmu_xy = dataset["bmu"].apply(_to_xy).tolist()
-        dataset["bmu_x"] = [x for x, _ in bmu_xy]
-        dataset["bmu_y"] = [y for _, y in bmu_xy]
+        # Margin: match the staircase you observed; no need for the dense list
+        "MARGIN":      [0.05, 0.08, 0.10, 0.12, 0.15, 0.18, 0.2, 0.25],
 
-    # --- Predictors rewritten to take params -------------------------------------------------
-    CLASSES = ["QSO", "YSO", "Star"]
-    IDX = {c: i for i, c in enumerate(CLASSES)}
-    # Laplace smoothing  # cap (avoid over-abstaining)
-    ALPHA = 1.0
+        # Laplace: you saw 0.5, 1.0, 2.0 all matter
+        "ALPHA":       [0.5, 1.0, 1.5, 2.0],
 
-    dataset = dataset[dataset["label"].isin(
-        CLASSES)].reset_index(drop=True)
+        # Reweighting: 0.5 dominated; 0.7 and 0.3 sometimes useful
+        "GAMMA":       [0.3, 0.5],
 
-    # infer grid size from observed coords
-    W = dataset["bmu_x"].max() + 1
-    H = dataset["bmu_y"].max() + 1
+        # Be stricter on "Other": small, focused ranges
+        # 0.0 ⇒ uses MIN_PURITY
+        "OTHER_PURITY_MIN": [0.3, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.7],
+        # 0.0 ⇒ uses MARGIN
+        "OTHER_MARGIN_MIN": [0.02, 0.03, 0.04],
+    }
 
-    # --------------------- split (grouped + stratified) ---------------------
-    sgkf = StratifiedGroupKFold(n_splits=10, shuffle=True, random_state=42)
-    fold = np.empty(len(dataset), dtype=int)
-    for k, (_, test_idx) in enumerate(sgkf.split(X=np.zeros(len(dataset)), y=dataset["label"], groups=dataset["source"])):
-        fold[test_idx] = k
-    dataset["fold"] = fold
+    COVERAGE_FLOORS = [0.1, 0.2, 0.3]
 
-    # map folds to ~70/15/15 (7/1.5/1.5 ≈ 7/1/2 here → 70/10/20 OR choose 7/1/2 as below)
-    train_folds = {0, 1, 2, 3, 4, 5, 6}
-    val_folds = {7}
-    test_folds = {8, 9}
+    # --------------------- map ids -> BMUs per split ---------------------
+    def _mk_map(som_map_id):
+        return {id_: (int(i), int(j))
+                for (i, j), ids in som_map_id.items()
+                for id_ in ids}
 
-    train = dataset[dataset.fold.isin(train_folds)].copy()
-    val = dataset[dataset.fold.isin(val_folds)].copy()
-    test = dataset[dataset.fold.isin(test_folds)].copy()
+    id_to_pos_train = _mk_map(som_map_id_train)
+    id_to_pos_val = _mk_map(som_map_id_val)
+    id_to_pos_test = _mk_map(som_map_id_test)
 
-    # sanity: no source leakage
-    assert set(train.source) & set(val.source) == set()
-    assert set(train.source) & set(test.source) == set()
-    assert set(val.source) & set(test.source) == set()
+    # attach BMUs; assert none missing, keep alignment
+    def _attach_bmu(df, mp, split_name):
+        df = df.copy()
+        df["bmu"] = df["id"].map(mp)
+        missing = int(df["bmu"].isna().sum())
+        assert missing == 0, f"BMU missing for {missing} items in {split_name}"
+        df["bmu_x"] = df["bmu"].apply(lambda t: int(t[0]))
+        df["bmu_y"] = df["bmu"].apply(lambda t: int(t[1]))
+        return df
 
-    # --------------------- train-only BMU histograms ---------------------
-    # counts[u_x, u_y, class]
-    hist = np.zeros((W, H, len(CLASSES)), dtype=np.float64)
+    train = _attach_bmu(train, id_to_pos_train, "train")
+    val = _attach_bmu(val,   id_to_pos_val,   "val")
+    test = _attach_bmu(test,  id_to_pos_test,  "test")
 
+    # keep only target classes
+    train = train[train["label"].isin(CLASSES)].reset_index(drop=True)
+    val = val[val["label"].isin(CLASSES)].reset_index(drop=True)
+    test = test[test["label"].isin(CLASSES)].reset_index(drop=True)
+
+    # --------------------- train-only histograms ---------------------
+    W = int(dim)
+    H = int(dim)
+    K = len(CLASSES)
     cls_to_idx = {c: i for i, c in enumerate(CLASSES)}
+    hist = np.zeros((W, H, K), dtype=np.float64)
+
     for _, r in train.iterrows():
-        hist[r.bmu_x, r.bmu_y, cls_to_idx[r.label]] += 1.0
+        hist[int(r.bmu_x), int(r.bmu_y), cls_to_idx[r.label]] += 1.0
 
-    support = hist.sum(axis=2)
-    # simple neighborhood smoothing (3x3 box) to reduce fragmentation
+    class_counts = hist.sum(axis=(0, 1))
 
-    def smooth3(arr):
-        pad = np.pad(arr, ((1, 1), (1, 1), (0, 0)), mode='edge')
+    # --------------------- surfaces (reweight + spatial + Laplace) ---------------------
+    def smooth_box(arr, k=3, mode="edge"):
+        assert k % 2 == 1
+        r = k // 2
+        pad = np.pad(arr, ((r, r), (r, r), (0, 0)), mode=mode)
+        Hh, Ww, Cc = arr.shape
         out = np.empty_like(arr)
-        for i in range(arr.shape[0]):
-            for j in range(arr.shape[1]):
-                window = pad[i:i+3, j:j+3, :]
-                out[i, j, :] = window.sum(axis=(0, 1))
+        for i in range(Hh):
+            for j in range(Ww):
+                out[i, j, :] = pad[i:i+k, j:j+k, :].sum(axis=(0, 1))
         return out
 
-    # After building train-only hist: hist[x,y,c]
-    # per-class totals in train
-    class_counts = hist.sum(axis=(0, 1))
-    w = class_counts.sum() / (len(CLASSES) * (class_counts + 1e-9))  # inverse frequency
-    hist_bal = hist * w.reshape(1, 1, -1)
+    _SURF_CACHE = {}
 
-    hist_s = smooth3(hist_bal)
+    def build_surfaces(ALPHA, GAMMA, windows):
+        key = (float(ALPHA), float(GAMMA), tuple(windows))
+        if key in _SURF_CACHE:
+            return _SURF_CACHE[key]
+        eps = 1e-9
+        mean_c = class_counts.mean() + eps
+        w = (mean_c / (class_counts + eps)) ** float(GAMMA)
+        hist_bal = hist * w.reshape(1, 1, -1)
 
-    # Laplace smoothing → posteriors per BMU
-    post = (hist_s + ALPHA)
-    post /= post.sum(axis=2, keepdims=True)
+        post_list, support_list, purity_list = [], [], []
+        for k in windows:
+            hsum = smooth_box(hist_bal, k=k, mode="edge")
+            supp = hsum.sum(axis=2)
+            p = (hsum + float(ALPHA))
+            p /= p.sum(axis=2, keepdims=True)
+            post_list.append(p)
+            support_list.append(supp)
+            purity_list.append(p.max(axis=2))
+        S = {"post_list": post_list, "support_list": support_list,
+             "purity_list": purity_list, "windows": list(windows)}
+        _SURF_CACHE[key] = S
+        return S
 
-    # per-cell purity after smoothing
-    purity = post.max(axis=2)
-    support_s = hist_s.sum(axis=2)
+    # --------------------- predictor (dynamic window + abstention) ---------------------
+    def predict_split(dfin, params, S, label_col="label"):
+        MIN_SUPPORT = float(params["MIN_SUPPORT"])
+        MIN_PURITY = float(params["MIN_PURITY"])
+        MARGIN = float(params.get("MARGIN", 0.0))
 
-    def predict_flat(dfin, params):
-        MIN_SUPPORT = params["MIN_SUPPORT"]
-        MIN_PURITY = params["MIN_PURITY"]
-        MARGIN = params.get("MARGIN", 0.0)
+        OTHER_PURITY_MIN = float(params.get("OTHER_PURITY_MIN", 0.80))
+        OTHER_MARGIN_MIN = float(params.get("OTHER_MARGIN_MIN", 0.10))
+
+        post_list, support_list, purity_list = S["post_list"], S["support_list"], S["purity_list"]
 
         rows = []
         for _, r in dfin.iterrows():
             x, y = int(r.bmu_x), int(r.bmu_y)
-
-            if support_s[x, y] == 0:
-                rows.append((r.label, None, 0.0, True))
+            chosen = 0
+            while chosen + 1 < len(support_list) and support_list[chosen][x, y] < MIN_SUPPORT:
+                chosen += 1
+            if support_list[chosen][x, y] == 0:
+                rows.append((r[label_col], None, 0.0, True))
                 continue
 
-            p = post[x, y, :]
-            # top-2 margin
+            p = post_list[chosen][x, y, :]
+            pur = float(purity_list[chosen][x, y])
             top2 = np.partition(p, -2)[-2:]
             margin = float(top2.max() - top2.min())
-
             conf = float(p.max())
-            pred_idx = int(p.argmax())
+            pred = CLASSES[int(p.argmax())]
 
-            abst = (support_s[x, y] < MIN_SUPPORT) or (
-                purity[x, y] < MIN_PURITY) or (margin < MARGIN)
-            rows.append(
-                (r.label, None if abst else CLASSES[pred_idx], conf, abst))
+            supp = float(support_list[chosen][x, y])
+
+            abst = (supp < MIN_SUPPORT)
+
+            if not abst:
+                if pred == OTHER_LABEL:
+                    # "Other" must meet the stricter of the two thresholds
+                    pur_req = max(MIN_PURITY, OTHER_PURITY_MIN)
+                    margin_req = max(MARGIN, OTHER_MARGIN_MIN)
+                    abst = (pur < pur_req) or (margin < margin_req)
+                else:
+                    # normal classes
+                    abst = (pur < MIN_PURITY) or (margin < MARGIN)
+
+            if abst:
+                pred = None
+                conf = 0.0
+
+            rows.append((r[label_col], None if abst else pred, conf, abst))
+
         return pd.DataFrame(rows, columns=["true", "pred", "conf", "abstain"])
 
-    def predict_hier(dfin, params):
-        MIN_SUPPORT = params["MIN_SUPPORT"]
-        MIN_PURITY = params["MIN_PURITY"]
-        TAU_QSO = params["TAU_QSO"]
-        MARGIN_QSO = params["MARGIN_QSO"]
-        MARGIN_STELLAR = params["MARGIN_STELLAR"]
-
-        rows = []
-        for _, r in dfin.iterrows():
-            x, y = int(r.bmu_x), int(r.bmu_y)
-            if support_s[x, y] == 0:
-                rows.append((r.label, None, 0.0, True))
-                continue
-
-            p = post[x, y, :].astype(float)
-            sup = float(support_s[x, y])
-            pur = float(purity[x, y])
-            if (sup < MIN_SUPPORT) or (pur < MIN_PURITY):
-                rows.append((r.label, None, p.max(), True))
-                continue
-
-            p_qso, p_yso, p_star = p[IDX["QSO"]], p[IDX["YSO"]], p[IDX["Star"]]
-            p_stel = p_yso + p_star
-
-            if (p_qso >= TAU_QSO) and ((p_qso - p_stel) >= MARGIN_QSO):
-                rows.append((r.label, "QSO", float(p_qso), False))
-                continue
-
-            if p_stel <= 1e-12:
-                rows.append((r.label, None, 0.0, True))
-                continue
-
-            py = p_yso / p_stel
-            ps = p_star / p_stel
-            margin2 = abs(py - ps)
-            if margin2 < MARGIN_STELLAR:
-                rows.append((r.label, None, max(py, ps), True))
-            else:
-                pred = "YSO" if py >= ps else "Star"
-                conf = float(max(py, ps))
-                rows.append((r.label, pred, conf, False))
-        return pd.DataFrame(rows, columns=["true", "pred", "conf", "abstain"])
-
-    def predict_hier_adapt(dfin, params):
-        MIN_SUPPORT = params["MIN_SUPPORT"]
-        MIN_PURITY = params["MIN_PURITY"]
-        TAU_QSO = params["TAU_QSO"]
-        MARGIN_QSO = params["MARGIN_QSO"]
-        BASE_STELLAR = params["BASE_STELLAR"]
-        K_STELLAR = params["K_STELLAR"]
-        STELLAR_MIN = params.get("STELLAR_MIN", 0.08)
-        STELLAR_MAX = params.get("STELLAR_MAX", 0.50)
-
-        rows = []
-        for _, r in dfin.iterrows():
-            x, y = int(r.bmu_x), int(r.bmu_y)
-            if support_s[x, y] == 0:
-                rows.append((r.label, None, 0.0, True))
-                continue
-
-            p = post[x, y, :].astype(float)
-            sup = float(support_s[x, y])
-            pur = float(purity[x, y])
-            if (sup < MIN_SUPPORT) or (pur < MIN_PURITY):
-                rows.append((r.label, None, p.max(), True))
-                continue
-
-            p_qso, p_yso, p_star = p[IDX["QSO"]], p[IDX["YSO"]], p[IDX["Star"]]
-            p_stel = p_yso + p_star
-
-            if (p_qso >= TAU_QSO) and ((p_qso - p_stel) >= MARGIN_QSO):
-                rows.append((r.label, "QSO", float(p_qso), False))
-                continue
-
-            if p_stel <= 1e-12:
-                rows.append((r.label, None, 0.0, True))
-                continue
-
-            py = p_yso / p_stel
-            ps = p_star / p_stel
-
-            th_stellar = BASE_STELLAR + K_STELLAR * (1.0 - pur)
-            th_stellar = min(max(th_stellar, STELLAR_MIN), STELLAR_MAX)
-
-            if abs(py - ps) < th_stellar:
-                rows.append((r.label, None, max(py, ps), True))
-            else:
-                pred = "YSO" if py >= ps else "Star"
-                conf = float(max(py, ps))
-                rows.append((r.label, pred, conf, False))
-        return pd.DataFrame(rows, columns=["true", "pred", "conf", "abstain"])
-
-    # --- Metrics helpers --------------------------------------------------------------------
-    def compute_metrics(res):
-        cov = 1.0 - res.abstain.mean()
-        kept = res[~res.abstain]
+    # --------------------- metrics ---------------------
+    def compute_metrics(res_df):
+        cov = 1.0 - float(res_df["abstain"].mean())
+        kept = res_df[~res_df.abstain]
         if len(kept) == 0:
             return {"coverage": cov, "macro_f1": 0.0, "per_class_f1": {c: 0.0 for c in CLASSES},
-                    "n_kept": 0, "n_total": len(res)}
+                    "n_kept": 0, "n_total": int(len(res_df)), "confusion": None}
         pr, rc, f1, _ = precision_recall_fscore_support(
-            kept["true"], kept["pred"], labels=CLASSES, zero_division=0)
-        macro = float(f1.mean())
-        return {"coverage": cov, "macro_f1": macro,
-                "per_class_f1": dict(zip(CLASSES, f1)),
-                "n_kept": len(kept), "n_total": len(res)}
+            kept["true"], kept["pred"], labels=CLASSES, zero_division=0
+        )
+        cm = confusion_matrix(kept["true"], kept["pred"], labels=CLASSES)
+        cm_df = pd.DataFrame(cm, index=[f"T:{c}" for c in CLASSES], columns=[
+                             f"P:{c}" for c in CLASSES])
+        return {"coverage": cov, "macro_f1": float(np.mean(f1)),
+                "per_class_f1": dict(zip(CLASSES, [float(x) for x in f1])),
+                "n_kept": int(len(kept)), "n_total": int(len(res_df)),
+                "confusion": cm_df}
 
-    # --- Grid search ------------------------------------------------------------------------
+    # --------------------- grid search once on VAL ---------------------
     def grid_iter(grid):
         keys = list(grid.keys())
         for values in product(*(grid[k] for k in keys)):
             yield dict(zip(keys, values))
 
-    def eval_method_on_val(method, grid, coverage_floor=0.75, top_k=5):
-        all_runs = []
-        for params in grid_iter(grid):
-            if method == "flat":
-                res = predict_flat(val, params)
-            elif method == "hier":
-                res = predict_hier(val, params)
-            elif method == "hier_adapt":
-                res = predict_hier_adapt(val, params)
-            else:
-                raise ValueError("Unknown method")
+    # how many total combos
+    TOTAL = 1
+    for k, vals in GRID.items():
+        TOTAL *= len(vals)
+    t0 = time.time()
+    all_runs = []
+    for i, p in enumerate(grid_iter(GRID), start=1):
+        # start time
+        start_time = time.time()
+        S = build_surfaces(p.get("ALPHA", 1.0), p.get("GAMMA", 0.0), WINDOWS)
+        res_val = predict_split(val, p, S, label_col="label")
+        m = compute_metrics(res_val)
+        all_runs.append({"params": p, **m})
 
-            m = compute_metrics(res)
-            all_runs.append({"method": method, "params": params, **m})
+        if i % 1000 == 0 or i == TOTAL:
+            elapsed = time.time() - t0
+            eta = (TOTAL - i) * (elapsed / i)   # simple avg-based ETA
+            print(f"{i}/{TOTAL} done | ETA: {int(eta)}s (~{eta/60:.1f} min)")
 
-        # choose best: macro-F1 under coverage constraint; tiebreak by coverage then kept
-        feasible = [r for r in all_runs if r["coverage"] >= coverage_floor]
-        pool = feasible if len(feasible) else all_runs
+    # --------------------- pick best per coverage floor & evaluate TEST ---------------------
+    best_by_floor = {}
+    for floor in COVERAGE_FLOORS:
+        feasible = [r for r in all_runs if r["coverage"] >= floor]
+        pool = feasible if feasible else all_runs
         best = max(pool, key=lambda r: (
             r["macro_f1"], r["coverage"], r["n_kept"]))
 
-        # print Top-K on val for this method
-        print(
-            f"\nTop {top_k} configs for method = {method} (sorted by macro-F1, then coverage):")
-        for r in sorted(pool, key=lambda r: (r["macro_f1"], r["coverage"]), reverse=True)[:top_k]:
-            print(
-                f"  F1={r['macro_f1']:.3f} | cov={r['coverage']:.3f} | params={r['params']}")
-        return best, all_runs
+        # Evaluate on TEST with same params
+        pbest = best["params"]
+        S_best = build_surfaces(pbest.get("ALPHA", 1.0),
+                                pbest.get("GAMMA", 0.0), WINDOWS)
 
-    # --- Default grids (tweak as needed) ----------------------------------------------------
-    grid_flat = {
-        "MIN_SUPPORT": [5, 8, 10],
-        "MIN_PURITY":  [0.55, 0.60, 0.65],
-        "MARGIN":      [0.10, 0.12, 0.15],
+        res_test = predict_split(test, pbest, S_best, label_col="label")
+        mtest = compute_metrics(res_test)
+
+        # Optional prints
+        print(f"\nCoverage floor: {floor:.1f}")
+        print(f"=== BEST ON VALIDATION ===")
+        print(f"Macro-F1: {best['macro_f1']:.3f} | Coverage: {best['coverage']:.3f} "
+              f"({best['n_kept']}/{best['n_total']})")
+        print("Params:", pbest)
+        if best["confusion"] is not None:
+            print("VAL Confusion (kept only):\n",
+                  best["confusion"].to_string())
+        if show_test:
+            print(f"[TEST] Macro-F1: {mtest['macro_f1']:.3f} | Coverage: {mtest['coverage']:.3f} "
+                  f"({mtest['n_kept']}/{mtest['n_total']})")
+            if mtest["confusion"] is not None:
+                print("TEST Confusion (kept only):\n",
+                      mtest["confusion"].to_string())
+
+        best_by_floor[floor] = {
+            "params": pbest,
+            "val_metrics": {k: best[k] for k in ("coverage", "macro_f1", "per_class_f1", "n_kept", "n_total")},
+            "val_confusion": best["confusion"],
+            "test_metrics": {k: mtest[k] for k in ("coverage", "macro_f1", "per_class_f1", "n_kept", "n_total")},
+            "test_confusion": mtest["confusion"],
+        }
+
+    return {
+        "classes": CLASSES,
+        "windows": WINDOWS,
+        "val_runs": all_runs,
+        "best_by_floor": best_by_floor,
     }
-    grid_hier = {
-        "MIN_SUPPORT":   [5, 8],
-        "MIN_PURITY":    [0.55, 0.60],
-        "TAU_QSO":       [0.55, 0.60, 0.65],
-        "MARGIN_QSO":    [0.08, 0.10, 0.12],
-        "MARGIN_STELLAR": [0.12, 0.15, 0.18],
+
+
+def get_classification(
+    som_map_id_train,
+    som_map_id_test,
+    som_map_id_val,
+    dataset_toclassify,
+    dataset,
+    train,
+    val,
+    test,
+    parameters_classification,
+    dim,
+    som,
+):
+    '''
+    # Get only flat
+    c_floor = [0.8, 0.9, 1.0]
+    for c in c_floor:
+        # start time
+        start_time = time.time()
+        print(f"Coverage floor: {c}")
+        parameters_classification["coverage_floor"] = c
+        get_classification_analysis(som_map_id, dataset_toclassify, simbad_dataset,
+                                    SIMBAD_classes, parameters_classification, dim, som)
+        end_time = time.time()
+        print(f"Time taken: {end_time - start_time} seconds")
+    '''
+
+    """
+    Single-run classifier using SOM BMU vote with dynamic neighborhood, Laplace smoothing,
+    tempered class reweighting, and abstention by support/purity/margin.
+
+    parameters_classification can provide:
+      - classes: list[str]                           (default ["QSO","YSO","Star"])
+      - MIN_SUPPORT, MIN_PURITY, MARGIN              (default 1, 0.55, 0.10)
+      - ALPHA, GAMMA                                 (default 2.0, 0.5)
+      - WINDOWS: iterable of odd ints (box sizes)    (default [3,5,7])
+      - report_validation: bool (kept for compatibility; prints are commented)
+    Returns:
+      dict with:
+        - params_used
+        - val_metrics (macro-F1, coverage, per_class_f1,
+                       confusion_matrix, n_kept/n_total)
+        - test_metrics (same fields as val_metrics)
+        - predictions (for dataset_toclassify)
+    """
+    import numpy as np
+    import pandas as pd
+    from sklearn.model_selection import StratifiedGroupKFold
+    from sklearn.metrics import precision_recall_fscore_support, confusion_matrix, classification_report
+
+    # --------------------- hyperparams & classes ---------------------
+    params = parameters_classification or {}
+    CLASSES = params.get("classes", ["QSO", "YSO", "Star"])
+    MIN_SUPPORT = float(params.get("MIN_SUPPORT", 1))
+    MIN_PURITY = float(params.get("MIN_PURITY", 0.55))
+    MARGIN = float(params.get("MARGIN", 0.05))
+    ALPHA = float(params.get("ALPHA", 2.0))
+    GAMMA = float(params.get("GAMMA", 0.5))
+    WINDOWS = list(params.get("WINDOWS", [3, 5, 7]))
+
+    OTHER_LABEL = params.get("OTHER_LABEL", "Other")
+    OTHER_PURITY_MIN = float(params.get("OTHER_PURITY_MIN", 0.80))
+    OTHER_MARGIN_MIN = float(params.get("OTHER_MARGIN_MIN", 0.10))
+
+    _ = bool(params.get("report_validation", True))  # retained for API compat
+
+    WINDOWS = sorted({int(k) for k in WINDOWS if int(k) %
+                     2 == 1 and int(k) >= 3})
+
+    # --------------------- BMU lookup ---------------------
+    id_to_pos_train = {}
+    for (i, j), ids in som_map_id_train.items():
+        for id_ in ids:
+            id_to_pos_train[id_] = (int(i), int(j))
+    id_to_pos_test = {}
+    for (i, j), ids in som_map_id_test.items():
+        for id_ in ids:
+            id_to_pos_test[id_] = (int(i), int(j))
+    id_to_pos_val = {}
+    for (i, j), ids in som_map_id_val.items():
+        for id_ in ids:
+            id_to_pos_val[id_] = (int(i), int(j))
+
+    def _attach_bmu(df, id2pos, split):
+        out = df.copy()
+        out['bmu'] = out['id'].map(id2pos)
+        missing = int(out['bmu'].isna().sum())
+        assert missing == 0, f"{split}: {missing} ids have no BMU in map"
+        out['bmu_x'] = out['bmu'].apply(lambda t: int(t[0]))
+        out['bmu_y'] = out['bmu'].apply(lambda t: int(t[1]))
+        return out
+
+    train = _attach_bmu(train, id_to_pos_train, "train")
+    val = _attach_bmu(val,   id_to_pos_val,   "val")
+    test = _attach_bmu(test,  id_to_pos_test,  "test")
+
+    # keep only target classes
+    train = train[train["label"].isin(CLASSES)].reset_index(drop=True)
+    test = test[test["label"].isin(CLASSES)].reset_index(drop=True)
+    val = val[val["label"].isin(CLASSES)].reset_index(drop=True)
+
+    # grid size
+    W = dim
+    H = dim
+
+    # --------------------- histograms from TRAIN only ---------------------
+    K = len(CLASSES)
+    cls_to_idx = {c: i for i, c in enumerate(CLASSES)}
+    hist = np.zeros((W, H, K), dtype=np.float64)
+    for _, r in train.iterrows():
+        hist[int(r.bmu_x), int(r.bmu_y), cls_to_idx[r.label]] += 1.0
+
+    class_counts = hist.sum(axis=(0, 1))
+
+    # --------------------- neighborhood surfaces (ALPHA, GAMMA, WINDOWS) ----------
+    def box_sum(arr, k, pad_mode="edge"):
+        assert k % 2 == 1
+        r = k // 2
+        pad = np.pad(arr, ((r, r), (r, r), (0, 0)), mode=pad_mode)
+        Hh, Ww, Cc = arr.shape
+        out = np.empty_like(arr)
+        for i in range(Hh):
+            for j in range(Ww):
+                out[i, j, :] = pad[i:i+k, j:j+k, :].sum(axis=(0, 1))
+        return out
+
+    # tempered class reweighting
+    eps = 1e-9
+    mean_c = class_counts.mean() + eps
+    w = (mean_c / (class_counts + eps)) ** GAMMA
+    hist_bal = hist * w.reshape(1, 1, -1)
+
+    # precompute per-window sums and posteriors
+    hist_s_list, support_list, post_list, purity_list = [], [], [], []
+    for k in WINDOWS:
+        hsum = box_sum(hist_bal, k, pad_mode="edge")
+        hist_s_list.append(hsum)
+        support_list.append(hsum.sum(axis=2))
+        p = (hsum + ALPHA)
+        p /= p.sum(axis=2, keepdims=True)
+        post_list.append(p)
+        purity_list.append(p.max(axis=2))
+
+    # --------------------- predictor (dynamic radius) ---------------------
+    def _predict_rows(dfin, require_true=False):
+        rows = []
+        for _, r in dfin.iterrows():
+            x, y = int(r.bmu_x), int(r.bmu_y)
+
+            # smallest window meeting MIN_SUPPORT
+            chosen = 0
+            while chosen + 1 < len(support_list) and support_list[chosen][x, y] < MIN_SUPPORT:
+                chosen += 1
+
+            # no evidence → abstain
+            if support_list[chosen][x, y] == 0:
+                if require_true:
+                    rows.append((r.label, None, 0.0, True))
+                else:
+                    rows.append((
+                        r.get("id", None),
+                        x, y, None, 0.0, True, 0.0, 0.0, WINDOWS[chosen]
+                    ))
+                continue
+
+            p = post_list[chosen][x, y, :]
+            pur = float(purity_list[chosen][x, y])
+            top2 = np.partition(p, -2)[-2:]
+            margin = float(top2.max() - top2.min())
+            conf = float(p.max())
+            pred_idx = int(p.argmax())
+            pred = CLASSES[pred_idx]
+
+            supp = float(support_list[chosen][x, y])
+
+            abst = (supp < MIN_SUPPORT)
+
+            if not abst:
+                if pred == OTHER_LABEL:
+                    # "Other" must meet the stricter of the two thresholds
+                    pur_req = max(MIN_PURITY, OTHER_PURITY_MIN)
+                    margin_req = max(MARGIN, OTHER_MARGIN_MIN)
+                    abst = (pur < pur_req) or (margin < margin_req)
+                else:
+                    # normal classes
+                    abst = (pur < MIN_PURITY) or (margin < MARGIN)
+
+            if abst:
+                pred = None
+                conf = 0.0
+
+            if require_true:
+                rows.append((r.label, None if abst else pred, conf, abst))
+            else:
+                rows.append((
+                    r.get("id", None),
+                    x, y, None if abst else pred, conf, abst,
+                    float(support_list[chosen][x, y]), pur, WINDOWS[chosen]
+                ))
+        if require_true:
+            return pd.DataFrame(rows, columns=["true", "pred", "conf", "abstain"])
+        else:
+            return pd.DataFrame(rows, columns=[
+                "id", "bmu_x", "bmu_y", "pred", "conf", "abstain",
+                "support_eff", "purity", "window_k"
+            ])
+
+    # --------------------- evaluation helper (VAL & TEST) ---------------------
+    def _eval_split(split_df, split_name):
+        res = _predict_rows(split_df, require_true=True)
+        cov = 1.0 - res["abstain"].mean()
+        kept = res[~res.abstain]
+        if len(kept) > 0:
+            pr, rc, f1, _ = precision_recall_fscore_support(
+                kept["true"], kept["pred"], labels=CLASSES, zero_division=0
+            )
+            cm = confusion_matrix(kept["true"], kept["pred"], labels=CLASSES)
+            cm_df = pd.DataFrame(cm, index=[f"T:{c}" for c in CLASSES], columns=[
+                                 f"P:{c}" for c in CLASSES])
+
+            # --- PRINTS COMMENTED (uncomment to view) ---
+            if split_name == "VAL":
+                print(
+                    f"[{split_name}] Macro-F1={np.mean(f1):.3f} | Coverage={cov:.3f} ({len(kept)}/{len(res)})")
+                print("Per-class F1:",
+                      dict(zip(CLASSES, [float(x) for x in f1])))
+                print("\nConfusion matrix (KEPT only; rows=true, cols=pred):")
+                print(cm_df.to_string())
+            elif split_name == "TEST":
+                print("TEST not printed to ensure no source leakage")
+
+            metrics = {
+                "coverage": float(cov),
+                "macro_f1": float(np.mean(f1)),
+                "per_class_f1": dict(zip(CLASSES, [float(x) for x in f1])),
+                "n_kept": int(len(kept)),
+                "n_total": int(len(res)),
+                "confusion_matrix": cm_df.to_dict(),
+            }
+        else:
+            # print(f"[{split_name}] Coverage={cov:.3f} (0/{len(res)}) — no kept predictions; confusion matrix unavailable.")
+            metrics = {"coverage": float(cov), "macro_f1": 0.0,
+                       "per_class_f1": {c: 0.0 for c in CLASSES},
+                       "n_kept": 0, "n_total": int(len(res)),
+                       "confusion_matrix": None}
+        return metrics
+
+    val_metrics = _eval_split(val,  "VAL") if len(val) > 0 else {}
+    test_metrics = _eval_split(test, "TEST") if len(test) > 0 else {}
+
+    # --------------------- predict unlabeled to-classify set ---------------------
+    to_ids = dataset_toclassify["id"].tolist(
+    ) if "id" in dataset_toclassify.columns else list(dataset_toclassify.index)
+    to_pos = [id_to_pos_train.get(i, None) for i in to_ids]
+    df_to = pd.DataFrame({"id": to_ids, "bmu": to_pos})
+
+    def _to_xy_maybe(v):
+        if v is None:
+            return None, None
+        if isinstance(v, (tuple, list)) and len(v) == 2:
+            return int(v[0]), int(v[1])
+        if isinstance(v, dict):
+            return int(v.get("x")), int(v.get("y"))
+        if isinstance(v, str):
+            x, y = v.replace("(", "").replace(")", "").split(",")
+            return int(float(x)), int(float(y))
+        return None, None
+
+    bxy = [_to_xy_maybe(v) for v in df_to["bmu"]]
+    df_to["bmu_x"] = [x for x, _ in bxy]
+    df_to["bmu_y"] = [y for _, y in bxy]
+    df_to = df_to.dropna(subset=["bmu_x", "bmu_y"]).reset_index(drop=True)
+
+    preds_df = _predict_rows(df_to, require_true=False)
+
+    return {
+        "params_used": {
+            "classes": CLASSES,
+            "MIN_SUPPORT": MIN_SUPPORT,
+            "MIN_PURITY": MIN_PURITY,
+            "MARGIN": MARGIN,
+            "ALPHA": ALPHA,
+            "GAMMA": GAMMA,
+            "WINDOWS": WINDOWS,
+        },
+        "val_metrics": val_metrics,
+        "test_metrics": test_metrics,
+        "predictions": preds_df,
     }
-    grid_hier_adapt = {
-        "MIN_SUPPORT":  [5, 8],
-        "MIN_PURITY":   [0.55, 0.60],
-        "TAU_QSO":      [0.55, 0.60],
-        "MARGIN_QSO":   [0.08, 0.10],
-        "BASE_STELLAR": [0.10, 0.12, 0.15],
-        "K_STELLAR":    [0.20, 0.30, 0.35],
-        "STELLAR_MIN":  [0.08],            # usually keep fixed
-        "STELLAR_MAX":  [0.40, 0.50],      # mild sensitivity
-    }
 
-    # Allow external override via parameters_classification dict (if you pass it in)
-    coverage_floor = parameters_classification.get(
-        "coverage_floor", 0.75) if isinstance(parameters_classification, dict) else 0.75
-
-    best_flat, _ = eval_method_on_val(
-        "flat",       grid_flat,       coverage_floor)
-    best_hier, _ = eval_method_on_val(
-        "hier",       grid_hier,       coverage_floor)
-    best_hier_ad, _ = eval_method_on_val(
-        "hier_adapt", grid_hier_adapt, coverage_floor)
-
-    candidates = [best_flat, best_hier, best_hier_ad]
-    best_overall = max(candidates, key=lambda r: (
-        r["macro_f1"], r["coverage"], r["n_kept"]))
-
-    print("\n=== BEST ON VALIDATION ===")
-    print(f"Method: {best_overall['method']}")
-    print(f"Macro-F1: {best_overall['macro_f1']:.3f} | Coverage: {best_overall['coverage']:.3f} "
-          f"({best_overall['n_kept']}/{best_overall['n_total']})")
-    print("Params:", best_overall["params"])
-    print("Per-class F1:", best_overall["per_class_f1"])
 
 '''
-
-
 def get_classification(som_map_id, dataset_toclassify, simbad_dataset, SIMBAD_classes, parameters_classification, dim, som):
-    # get_classification_analysis(som_map_id, dataset_toclassify, simbad_dataset,
-    #                            SIMBAD_classes, parameters_classification, dim, som)
-
-    para_class = {
-        "CLASSES": ["QSO", "YSO", "Star", "XrayBin"],  # 3-class example
-        "coverage_floor": 0.70,
-        "balance_hist": True,
-        "random_state": 42,
-    }
-
-    # ------------------------------------------------------------------
-    # 2) Call the function (3-class)
-    # ------------------------------------------------------------------
-    res3 = get_classification_analysis_tree(
-        som_map_id=som_map_id,
-        dataset_toclassify=dataset_toclassify,
-        simbad_dataset=simbad_dataset,
-        SIMBAD_classes=SIMBAD_classes,
-        parameters_classification=para_class,
-        dim=dim,
-        som=som,
-    )
-
-    print("\n--- SUMMARY (3 classes) ---")
-    print("Classes:", res3["classes"])
-    print("Best params:", res3["best_params"])
-    print("Validation macro-F1 / coverage:",
-          res3["val_metrics"]["macro_f1"], "/", res3["val_metrics"]["coverage"])
-    print("Test      macro-F1 / coverage:",
-          res3["test_metrics"]["macro_f1"], "/", res3["test_metrics"]["coverage"])
 
     id_to_pos = {}
     for (i, j), ids in som_map_id.items():
@@ -3350,427 +3687,7 @@ def get_classification(som_map_id, dataset_toclassify, simbad_dataset, SIMBAD_cl
 
     source_id = simbad_dataset['name'].tolist()
 
-    # print distribution of classes
-    dataset = pd.DataFrame({
-        "source": source_id,
-        "det_id": classified_ids,
-        "bmu": classified_positions,
-        "label": classified_classes,
-    })
-
-    if "bmu_x" not in dataset.columns or "bmu_y" not in dataset.columns:
-        def _to_xy(v):
-            # accepts (x,y), [x,y], {"x":..,"y":..}, or "x,y"
-            if isinstance(v, (tuple, list)) and len(v) == 2:
-                return int(v[0]), int(v[1])
-            if isinstance(v, dict):
-                return int(v.get("x")), int(v.get("y"))
-            if isinstance(v, str):
-                x, y = v.replace("(", "").replace(")", "").split(",")
-                return int(float(x)), int(float(y))
-            raise ValueError(f"Unrecognized BMU format: {v}")
-
-        bmu_xy = dataset["bmu"].apply(_to_xy).tolist()
-        dataset["bmu_x"] = [x for x, _ in bmu_xy]
-        dataset["bmu_y"] = [y for _, y in bmu_xy]
-
-    # --------------------- setup ---------------------
-    # CLASSES = ["QSO", "YSO", "Star"]      # XrayBin omitted
-    CLASSES = ["QSO", "YSO", "Star", "XrayBin"]
-    MIN_SUPPORT = 10                     # tune on val
-    MIN_PURITY = 0.55                    # tune on val
-    ALPHA = 1.0                           # Laplace smoothing
-    MARGIN = 0
-
-    TAU_QSO = 0.6     # min prob to call QSO
-    MARGIN_QSO = 0.1     # QSO vs Stellar margin (pQSO - pStellar)
-    MARGIN_STELLAR = 0.18     # YSO vs Star margin after renormalization
-
-    BASE_STELLAR = 0.12
-    K_STELLAR = 0.30
-    STELLAR_MIN = 0.08     # floor for margin
-    STELLAR_MAX = 0.50     # cap (avoid over-abstaining)
-
-    # params for tree
-    '''
-    params = {
-        "MIN_SUPPORT": 10,
-        "MIN_PURITY":  0.55,
-        "stage0":      [],  # none
-        "anchor":      {"label": "QSO", "TAU": 0.6, "MARGIN": 0.1, "right_group": ["YSO", "Star"]},
-        "adapt":       {"group": ["YSO", "Star"], "BASE": 0.12, "K": 0.30, "MIN": 0.08, "MAX": 0.50},
-    }
-    '''
-    params = {
-        "MIN_SUPPORT": 10,
-        "MIN_PURITY":  0.55,
-        # Stage-0 gate
-        "stage0":      [{"label": "XrayBin", "TAU": 0.60, "MARGIN": 0.10}],
-        "anchor":      {"label": "QSO", "TAU": 0.6, "MARGIN": 0.1, "right_group": ["YSO", "Star"]},
-        "adapt":       {"group": ["YSO", "Star"], "BASE": 0.12, "K": 0.30, "MIN": 0.08, "MAX": 0.50},
-    }
-
-    dataset = dataset[dataset["label"].isin(
-        CLASSES)].reset_index(drop=True)
-
-    # infer grid size from observed coords
-    W = dataset["bmu_x"].max() + 1
-    H = dataset["bmu_y"].max() + 1
-
-    # --------------------- split (grouped + stratified) ---------------------
-    sgkf = StratifiedGroupKFold(n_splits=10, shuffle=True, random_state=42)
-    fold = np.empty(len(dataset), dtype=int)
-    for k, (_, test_idx) in enumerate(sgkf.split(X=np.zeros(len(dataset)), y=dataset["label"], groups=dataset["source"])):
-        fold[test_idx] = k
-    dataset["fold"] = fold
-
-    # map folds to ~70/15/15 (7/1.5/1.5 ≈ 7/1/2 here → 70/10/20 OR choose 7/1/2 as below)
-    train_folds = {0, 1, 2, 3, 4, 5, 6}
-    val_folds = {7}
-    test_folds = {8, 9}
-
-    train = dataset[dataset.fold.isin(train_folds)].copy()
-    val = dataset[dataset.fold.isin(val_folds)].copy()
-    test = dataset[dataset.fold.isin(test_folds)].copy()
-
-    # sanity: no source leakage
-    assert set(train.source) & set(val.source) == set()
-    assert set(train.source) & set(test.source) == set()
-    assert set(val.source) & set(test.source) == set()
-
-    # --------------------- train-only BMU histograms ---------------------
-    # counts[u_x, u_y, class]
-    hist = np.zeros((W, H, len(CLASSES)), dtype=np.float64)
-
-    cls_to_idx = {c: i for i, c in enumerate(CLASSES)}
-    for _, r in train.iterrows():
-        hist[r.bmu_x, r.bmu_y, cls_to_idx[r.label]] += 1.0
-
-    support = hist.sum(axis=2)
-    # simple neighborhood smoothing (3x3 box) to reduce fragmentation
-
-    def smooth3(arr):
-        pad = np.pad(arr, ((1, 1), (1, 1), (0, 0)), mode='edge')
-        out = np.empty_like(arr)
-        for i in range(arr.shape[0]):
-            for j in range(arr.shape[1]):
-                window = pad[i:i+3, j:j+3, :]
-                out[i, j, :] = window.sum(axis=(0, 1))
-        return out
-
-    # After building train-only hist: hist[x,y,c]
-    # per-class totals in train
-    class_counts = hist.sum(axis=(0, 1))
-    w = class_counts.sum() / (len(CLASSES) * (class_counts + 1e-9))  # inverse frequency
-    hist_bal = hist * w.reshape(1, 1, -1)
-
-    hist_s = smooth3(hist_bal)
-
-    # Laplace smoothing → posteriors per BMU
-    post = (hist_s + ALPHA)
-    post /= post.sum(axis=2, keepdims=True)
-
-    # per-cell purity after smoothing
-    purity = post.max(axis=2)
-    support_s = hist_s.sum(axis=2)
-
-    # --------------------- predict with abstention ---------------------
-    def predict_df(dfin):
-        y_true, y_pred, y_conf, abstain = [], [], [], []
-        for _, r in dfin.iterrows():
-            px, py = int(r.bmu_x), int(r.bmu_y)
-
-            # if cell unseen in train, force abstain
-            if support_s[px, py] == 0:
-                y_pred.append(None)
-                y_conf.append(0.0)
-                abstain.append(True)
-                y_true.append(r.label)
-                continue
-
-            # posterior over classes for this BMU (after prior-correction + smoothing)
-            p = post[px, py, :]
-            # ---- margin computation (efficient, no full sort) ----
-            top2 = np.partition(p, -2)[-2:]     # two largest probs, unsorted
-            margin = float(top2.max() - top2.min())
-            conf = float(p.max())
-            pred_idx = int(p.argmax())
-
-            # your existing rules
-            cell_support = float(support_s[px, py])
-            is_abstain = (cell_support < MIN_SUPPORT) or (
-                purity[px, py] < MIN_PURITY)
-
-            # add margin rule
-            is_abstain |= (margin < MARGIN)
-
-            y_pred.append(CLASSES[pred_idx] if not is_abstain else None)
-            y_conf.append(conf)
-            abstain.append(is_abstain)
-            y_true.append(r.label)
-        return pd.DataFrame({"true": y_true, "pred": y_pred, "conf": y_conf, "abstain": abstain})
-
-    # {"QSO":0,"YSO":1,"Star":2} in your order
-    IDX = {c: i for i, c in enumerate(CLASSES)}
-
-    def predict_hier(dfin):
-        rows = []
-        for _, r in dfin.iterrows():
-            x, y = int(r.bmu_x), int(r.bmu_y)
-            if support_s[x, y] == 0:
-                rows.append((r.label, None, 0.0, True))
-                continue
-
-            p = post[x, y, :].astype(float)
-            supp = float(support_s[x, y])
-            pur = float(purity[x, y])
-
-            abst = (supp < MIN_SUPPORT) or (pur < MIN_PURITY)
-
-            # --- Stage 1: QSO vs Stellar ---
-            p_qso = p[IDX["QSO"]]
-            p_yso = p[IDX["YSO"]]
-            p_star = p[IDX["Star"]]
-            p_stel = p_yso + p_star
-
-            if not abst and (p_qso >= TAU_QSO) and ((p_qso - p_stel) >= MARGIN_QSO):
-                pred, conf = "QSO", float(p_qso)
-            else:
-                # --- Stage 2: YSO vs Star (renormalize inside stellar branch) ---
-                if p_stel <= 1e-12:
-                    pred, conf, abst = None, 0.0, True
-                else:
-                    py = p_yso / p_stel
-                    ps = p_star / p_stel
-                    # top-2 margin within {YSO, Star}
-                    margin2 = abs(py - ps)
-                    if abst or (margin2 < MARGIN_STELLAR):
-                        pred, conf, abst = None, max(py, ps), True
-                    else:
-                        pred, conf = ("YSO", py) if py >= ps else ("Star", ps)
-
-            rows.append((r.label, pred, conf, abst))
-
-        return pd.DataFrame(rows, columns=["true", "pred", "conf", "abstain"])
-
-    def predict_hier_adaptive(dfin):
-        rows = []
-        for _, r in dfin.iterrows():
-            x, y = int(r.bmu_x), int(r.bmu_y)
-
-            # unseen BMU -> abstain
-            if support_s[x, y] == 0:
-                rows.append((r.label, None, 0.0, True))
-                continue
-
-            p = post[x, y, :].astype(float)          # p over [QSO, YSO, Star]
-            sup = float(support_s[x, y])
-            pur = float(purity[x, y])
-
-            # global gates
-            abst = (sup < MIN_SUPPORT) or (pur < MIN_PURITY)
-            if abst:
-                rows.append((r.label, None, p.max(), True))
-                continue
-
-            # ----- Stage 1: QSO vs Stellar -----
-            p_qso = p[IDX["QSO"]]
-            p_yso = p[IDX["YSO"]]
-            p_star = p[IDX["Star"]]
-            p_stel = p_yso + p_star
-
-            if (p_qso >= TAU_QSO) and ((p_qso - p_stel) >= MARGIN_QSO):
-                rows.append((r.label, "QSO", float(p_qso), False))
-                continue
-
-            # ----- Stage 2: YSO vs Star (renormalize inside stellar) -----
-            if p_stel <= 1e-12:
-                rows.append((r.label, None, 0.0, True))
-                continue
-
-            py = p_yso / p_stel
-            ps = p_star / p_stel
-
-            # adaptive margin based on BMU purity
-            th_stellar = BASE_STELLAR + K_STELLAR * (1.0 - pur)
-            # clamp to reasonable bounds
-            if th_stellar < STELLAR_MIN:
-                th_stellar = STELLAR_MIN
-            if th_stellar > STELLAR_MAX:
-                th_stellar = STELLAR_MAX
-
-            if abs(py - ps) < th_stellar:
-                rows.append((r.label, None, max(py, ps), True))
-            else:
-                if py >= ps:
-                    rows.append((r.label, "YSO", float(py), False))
-                else:
-                    rows.append((r.label, "Star", float(ps), False))
-
-        return pd.DataFrame(rows, columns=["true", "pred", "conf", "abstain"])
-
-    from typing import List, Dict, Any
-
-    # ---------- Generic, class-agnostic predictor (single function) ----------
-    # Inputs required in scope: post, support_s, purity            (from your train-only histograms)
-    #                            CLASSES (list of labels, dynamic) e.g., ["QSO","YSO","Star"] or +["XrayBin"]
-
-    def predict_tree(dfin: pd.DataFrame, classes: List[str], params: Dict[str, Any]) -> pd.DataFrame:
-        IDX = {c: i for i, c in enumerate(classes)}
-
-        MIN_SUPPORT = params.get("MIN_SUPPORT", 5)
-        MIN_PURITY = params.get("MIN_PURITY", 0.55)
-
-        # ---- Stage-0: optional one-vs-rest gates (list of dicts)
-        # e.g., [{"label":"XrayBin","TAU":0.60,"MARGIN":0.10}]
-        stage0 = params.get("stage0", [])
-
-        # ---- Anchor split (label vs group)
-        # e.g., {"label":"QSO","TAU":0.60,"MARGIN":0.10,"right_group":["YSO","Star"]}
-        anchor = params.get("anchor", None)
-
-        # ---- Inside-group decision (adaptive binary margin)
-        # e.g., {"group":["YSO","Star"], "BASE":0.12,"K":0.30,"MIN":0.08,"MAX":0.50}
-        adapt = params.get("adapt", None)
-
-        rows = []
-        for _, r in dfin.iterrows():
-            x, y = int(r.bmu_x), int(r.bmu_y)
-
-            # unseen BMU
-            if support_s[x, y] == 0:
-                rows.append((r.label, None, 0.0, True))
-                continue
-
-            p = post[x, y, :].astype(float)
-            sup = float(support_s[x, y])
-            pur = float(purity[x, y])
-
-            # global gates
-            if (sup < MIN_SUPPORT) or (pur < MIN_PURITY):
-                rows.append((r.label, None, p.max(), True))
-                continue
-
-            # ---- Stage-0: try any declared one-vs-rest classes (if present)
-            fired = False
-            for gate in stage0:
-                lbl = gate["label"]
-                if lbl in IDX:
-                    p_new = p[IDX[lbl]]
-                    p_rest = 1.0 - p_new
-                    if (p_new >= gate.get("TAU", 0.60)) and ((p_new - p_rest) >= gate.get("MARGIN", 0.10)):
-                        rows.append((r.label, lbl, float(p_new), False))
-                        fired = True
-                        break
-            if fired:
-                continue
-
-            # ---- Anchor split: label vs group (e.g., QSO vs Stellar)
-            # If not provided or not present in CLASSES, skip to final decision
-            if anchor and (anchor["label"] in IDX):
-                left_lbl = anchor["label"]
-                right_lbls = [g for g in anchor.get(
-                    "right_group", []) if g in IDX]
-                # <— convert labels to integer indices
-                right_idx = [IDX[g] for g in right_lbls]
-
-                p_left = float(p[IDX[left_lbl]])
-                p_right = float(p[right_idx].sum()) if len(
-                    right_idx) else 0.0  # <— OK now
-
-                if (p_left >= anchor.get("TAU", 0.60)) and ((p_left - p_right) >= anchor.get("MARGIN", 0.10)):
-                    rows.append((r.label, left_lbl, p_left, False))
-                    continue
-
-                # ---- Inside right group: adaptive binary (if specified and 2 labels)
-                if adapt:
-                    grp_lbls = [g for g in adapt.get("group", []) if g in IDX]
-                    if len(grp_lbls) == 2:
-                        g1, g2 = grp_lbls
-                        g1i, g2i = IDX[g1], IDX[g2]
-                        denom = float(p[[g1i, g2i]].sum())
-                        if denom <= 1e-12:
-                            rows.append((r.label, None, 0.0, True))
-                            continue
-
-                        pg1 = float(p[g1i] / denom)
-                        pg2 = float(p[g2i] / denom)
-
-                        base = adapt.get("BASE", 0.12)
-                        k = adapt.get("K", 0.30)
-                        tmin = adapt.get("MIN", 0.08)
-                        tmax = adapt.get("MAX", 0.50)
-                        th = max(tmin, min(base + k*(1.0 - pur), tmax))
-
-                        if abs(pg1 - pg2) < th:
-                            rows.append((r.label, None, max(pg1, pg2), True))
-                        else:
-                            if pg1 >= pg2:
-                                rows.append((r.label, g1, pg1, False))
-                            else:
-                                rows.append((r.label, g2, pg2, False))
-                        continue
-                    # if group is not exactly 2 classes, fall through to argmax
-            # ---- Fallback: plain argmax over all classes (rarely needed)
-            pred_idx = int(p.argmax())
-            rows.append((r.label, classes[pred_idx], float(p.max()), False))
-
-        return pd.DataFrame(rows, columns=["true", "pred", "conf", "abstain"])
-
-    val_res = predict_df(val)
-    val_res_hier = predict_hier(val)
-    val_res_adapt = predict_hier_adaptive(val)
-    val_res_tree = predict_tree(val, CLASSES, params)
-
-    # --------- convenience reporter ----------
-
-    def report(res, name):
-        cov = 1.0 - res["abstain"].mean()
-        kept = res[~res.abstain]
-        print(f"\n=== {name} ===")
-        print(f"Coverage: {cov:.3f} ({len(kept)}/{len(res)})")
-        if len(kept) > 0:
-            print(classification_report(
-                kept["true"], kept["pred"], labels=CLASSES, digits=3))
-            print("Confusion matrix (kept only):\n", confusion_matrix(
-                kept["true"], kept["pred"], labels=CLASSES))
-
-    report(val_res,  "Validation")
-    report(val_res_hier, "Validation Hier")
-    # After tuning MIN_SUPPORT / MIN_PURITY on val, lock them and then:
-    # report(test_res, "Test")
-    # --------------------- run on val/test ---------------------
-    report(val_res_adapt, "Validation (Adaptive Hier)")
-    # (after tuning on val, freeze thresholds and call report(test_res_adapt, "Test"))
-    report(val_res_tree, "Validation (Tree)")
-    '''
-    from itertools import product
-
-    def eval_with(th_support, th_purity, th_margin):
-        global MIN_SUPPORT, MIN_PURITY, MARGIN
-        MIN_SUPPORT, MIN_PURITY, MARGIN = th_support, th_purity, th_margin
-        res = predict_df(val)
-        kept = res[~res.abstain]
-        from sklearn.metrics import f1_score
-        macro_f1 = f1_score(
-            kept["true"], kept["pred"], labels=CLASSES, average="macro") if len(kept) else 0.0
-        coverage = 1.0 - res["abstain"].mean()
-        return macro_f1, coverage
-
-    grid_support = [5, 8, 10]
-    grid_purity = [0.60, 0.65, 0.70]
-    grid_margin = [0.10, 0.15, 0.20]
-
-    best = None
-    for s, p, m in product(grid_support, grid_purity, grid_margin):
-        f1, cov = eval_with(s, p, m)
-        if cov >= 0.65:  # coverage floor you want
-            score = f1   # optimize macro-F1 under the coverage constraint
-            best = max(best or (-1, 0, 0, 0), (score, s, p, m))
-
-    print("Best (macro-F1 | MIN_SUPPORT, MIN_PURITY, MARGIN):", best)
-
-    '''    # Create a mapping from positions to classes
+        # Create a mapping from positions to classes
     neuron_class_map = defaultdict(list)
     for id_, pos, cls in zip(classified_ids, classified_positions, classified_classes):
         neuron_class_map[pos].append(cls)
@@ -3886,6 +3803,7 @@ def get_classification(som_map_id, dataset_toclassify, simbad_dataset, SIMBAD_cl
                 })
 
     return assignments_central, assignments_neighbor, all_confidences_central, all_confidences_neighbor
+'''
 
 
 def validate_and_load_dataset(uploaded_file, expected_columns):
@@ -4545,7 +4463,7 @@ def category_plot_sources_hex_with_size_variation(_map, flip=True, custom_colors
     st.altair_chart(c, use_container_width=True)
 
 
-def create_multi_features_plot(var_map, scaling_options, color_type, color_scheme, feature_name, topology='rectangular'):
+def create_multi_features_plot(var_map, scaling_options, color_type, color_scheme, feature_name, topology='rectangular', category_map=None, strokeWidth_enhanced=3.0):
     """Create multiple feature plots side by side with shared colorbar"""
     import altair as alt
     import pandas as pd
@@ -4564,7 +4482,7 @@ def create_multi_features_plot(var_map, scaling_options, color_type, color_schem
                 category_plot_sources_hex(var_map)
             else:
                 features_plot_hex(var_map, color_type, color_scheme,
-                                  scaling=scaling_options[0], feature_name=feature_name)
+                                  scaling=scaling_options[0], feature_name=feature_name, category_map=category_map, strokeWidth_enhanced=strokeWidth_enhanced)
         return
 
     # Multiple plots
