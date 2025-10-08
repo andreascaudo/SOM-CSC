@@ -13,7 +13,6 @@ import itertools
 # do delate after analysis
 from itertools import product
 from sklearn.metrics import f1_score, precision_recall_fscore_support, confusion_matrix, classification_report
-from classification import *
 
 
 # Global dictionary to store min/max values per feature and metric type
