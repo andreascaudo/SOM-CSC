@@ -3116,24 +3116,31 @@ def get_classification_analysis_from_splits(
 
     # --------------------- params & classes ---------------------
     params = parameters_classification or {}
-    CLASSES = list(params.get("classes", ["QSO", "YSO", "Star", "Other"]))
-    OTHER_LABEL = params.get("OTHER_LABEL", "Other")
+    CLASSES = list(params.get("classes", ["QSO", "YSO", "Star"]))
+
+    # OTHER_LABEL = params.get("OTHER_LABEL", "Other")
     WINDOWS = list(params.get("WINDOWS", [3, 5, 7]))
     WINDOWS = sorted({int(k) for k in WINDOWS if int(k) %
                      2 == 1 and int(k) >= 3})
 
-    '''
     GRID = {
-        "MIN_SUPPORT": params.get("GRID_MIN_SUPPORT", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
-        "MIN_PURITY":  params.get("GRID_MIN_PURITY",  [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0]),
-        "MARGIN":      params.get("GRID_MARGIN",      [0.05, 0.08, 0.10, 0.12, 0.15, 0.18, 0.20, 0.22, 0.25]),
-        "ALPHA":       params.get("GRID_ALPHA",       [0.5, 1.0, 2.0]),
-        "GAMMA":       params.get("GRID_GAMMA",       [0.0, 0.3, 0.5, 0.7, 1.0]),
-        "OTHER_PURITY_MIN": params.get("GRID_OTHER_PURITY_MIN", [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]),
-        "OTHER_MARGIN_MIN": params.get("GRID_OTHER_MARGIN_MIN", [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]),
-    }
-    '''
+        # Support: evita 0, resta permissivo con rari ma non troppo
+        "MIN_SUPPORT":  [1, 3, 5, 10, 20, 100],
 
+        # Purity: fascia che hai visto funzionare + un minimo più alto
+        "MIN_PURITY":   [0.2, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.6, 0.7, 0.8, 0.9],
+
+        # Margin: piccoli salti fino a 0.15
+        "MARGIN":       [0.03, 0.05, 0.08, 0.10, 0.12, 0.15, 0.20, 0.25, 0.30],
+
+        # Laplace smoothing
+        "ALPHA":        [0.5, 1.0, 1.5, 2.0],
+
+        # Reweighting (boost ai rari): includi anche 1.0 per boost forte
+        "GAMMA":        [0.3, 0.5, 0.7, 1.0, 1.5, 2.0],
+    }
+
+    '''
     GRID = {
         # Support: always 1 in your winners; keep 2 as a guard-rail
         "MIN_SUPPORT": [1],
@@ -3157,8 +3164,9 @@ def get_classification_analysis_from_splits(
         # 0.0 ⇒ uses MARGIN
         "OTHER_MARGIN_MIN": [0.02, 0.03, 0.04],
     }
+    '''
 
-    COVERAGE_FLOORS = [0.1, 0.2, 0.3]
+    COVERAGE_FLOORS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 
     # --------------------- map ids -> BMUs per split ---------------------
     def _mk_map(som_map_id):
@@ -3244,8 +3252,8 @@ def get_classification_analysis_from_splits(
         MIN_PURITY = float(params["MIN_PURITY"])
         MARGIN = float(params.get("MARGIN", 0.0))
 
-        OTHER_PURITY_MIN = float(params.get("OTHER_PURITY_MIN", 0.80))
-        OTHER_MARGIN_MIN = float(params.get("OTHER_MARGIN_MIN", 0.10))
+        # OTHER_PURITY_MIN = float(params.get("OTHER_PURITY_MIN", 0.80))
+        # OTHER_MARGIN_MIN = float(params.get("OTHER_MARGIN_MIN", 0.10))
 
         post_list, support_list, purity_list = S["post_list"], S["support_list"], S["purity_list"]
 
@@ -3271,14 +3279,16 @@ def get_classification_analysis_from_splits(
             abst = (supp < MIN_SUPPORT)
 
             if not abst:
+                '''
                 if pred == OTHER_LABEL:
                     # "Other" must meet the stricter of the two thresholds
                     pur_req = max(MIN_PURITY, OTHER_PURITY_MIN)
                     margin_req = max(MARGIN, OTHER_MARGIN_MIN)
                     abst = (pur < pur_req) or (margin < margin_req)
                 else:
-                    # normal classes
-                    abst = (pur < MIN_PURITY) or (margin < MARGIN)
+                    '''
+                # normal classes
+                abst = (pur < MIN_PURITY) or (margin < MARGIN)
 
             if abst:
                 pred = None
@@ -3439,9 +3449,11 @@ def get_classification(
     GAMMA = float(params.get("GAMMA", 0.5))
     WINDOWS = list(params.get("WINDOWS", [3, 5, 7]))
 
+    '''
     OTHER_LABEL = params.get("OTHER_LABEL", "Other")
     OTHER_PURITY_MIN = float(params.get("OTHER_PURITY_MIN", 0.80))
     OTHER_MARGIN_MIN = float(params.get("OTHER_MARGIN_MIN", 0.10))
+    '''
 
     _ = bool(params.get("report_validation", True))  # retained for API compat
 
@@ -3557,6 +3569,7 @@ def get_classification(
             abst = (supp < MIN_SUPPORT)
 
             if not abst:
+                '''
                 if pred == OTHER_LABEL:
                     # "Other" must meet the stricter of the two thresholds
                     pur_req = max(MIN_PURITY, OTHER_PURITY_MIN)
@@ -3564,7 +3577,8 @@ def get_classification(
                     abst = (pur < pur_req) or (margin < margin_req)
                 else:
                     # normal classes
-                    abst = (pur < MIN_PURITY) or (margin < MARGIN)
+                '''
+                abst = (pur < MIN_PURITY) or (margin < MARGIN)
 
             if abst:
                 pred = None

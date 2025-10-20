@@ -115,7 +115,7 @@ dataset_version = st.sidebar.selectbox(
     'Dataset version', ['CSC 2.1.1', 'CSC 2.1.1 clean'], index=0, key='dataset_selector')
 
 if dataset_version == 'CSC 2.1.1':
-    raw_dataset_path = './data/csc211_mastertable_clean_observationlevel_COMPLETE_xmatchSimbad1arcsec_log_norm_id/'
+    raw_dataset_path = './data/csc211_mastertable_clean_observationlevel_COMPLETE_xmatchSimbad1arcsec_log_norm_id_ClassAgg/'
 elif dataset_version == 'CSC 2.1.1 clean':
     raw_dataset_path = './data/csc212_mastertable_clean_log_norm_id/'
 
@@ -171,12 +171,12 @@ st.session_state.df_index.columns = st.session_state.df_index.columns.str.replac
     '_log_norm', '')
 
 # GMM_cluster_labels = st.session_state.df['cluster']
-st.session_state.simbad_type = 'main_type'  # otype
+st.session_state.simbad_type = 'class'  # otype, main_type
 main_type = st.session_state.raw_df[st.session_state.simbad_type]
 # default_main_type = ['QSO', 'AGN', 'Seyfert_1', 'Seyfert_2', 'HMXB',
 #                     'LMXB', 'XB', 'YSO', 'TTau*', 'Orion_V*']
 
-default_main_type = ['HighMassXBin', 'PartofG', 'QSO', 'Star', 'X', 'YSO']
+default_main_type = ['YSO', 'Binaries', 'AGN', 'Stars']
 color_schemes = ['lightmulti', 'blueorange',
                  'viridis', 'redyellowblue', 'plasma', 'greenblue', 'redblue']
 
@@ -1793,7 +1793,7 @@ if st.session_state.SOM_loaded:
                 # Set parameters
 
                 main_type_counts = main_type.value_counts()
-                default = ['QSO', 'YSO', 'Star']
+                default = ['YSO', 'Stars']
                 default_main_type_counts = []
                 for default in default:
                     default_main_type_counts.append(
@@ -1821,8 +1821,8 @@ if st.session_state.SOM_loaded:
                     'Windows', [3, 5, 7], default=[3, 5, 7], help='Windows')
 
                 # Ensure "Other" is even considered
-                parameters_classification.setdefault('OTHER_LABEL', 'Other')
-
+                # parameters_classification.setdefault('OTHER_LABEL', 'Other')
+                '''
                 # Purity: from MIN_PURITY up to 1.0
                 parameters_classification['OTHER_PURITY_MIN'] = st.slider(
                     'Other Purity Min', 0.0, 1.0, 0.5, help='Other Purity Min')
@@ -1830,6 +1830,7 @@ if st.session_state.SOM_loaded:
                 # Other Margin Min
                 parameters_classification['OTHER_MARGIN_MIN'] = st.slider(
                     'Other Margin Min', 0.0, 0.5, 0.1, help='Other Margin Min')
+                '''
 
                 dataset_choice = st.radio(
                     'Choose the dataset', ['Use the main dataset', 'Upload a new dataset'])
@@ -1894,14 +1895,26 @@ if st.session_state.SOM_loaded:
                     assert set(val.name) & set(test.name) == set()
 
                     TARGET = parameters_classification['classes']
-                    OTHER = 'Other'
+                    # OTHER = 'Other'
 
-                    for d in (train, val, test):
+                    '''for d in (train, val, test):
                         d.loc[:, 'label'] = np.where(d[st.session_state.simbad_type].isin(
-                            TARGET), d[st.session_state.simbad_type], OTHER)
+                            TARGET), d[st.session_state.simbad_type], OTHER)'''
+
+                    # Filter each dataset to keep only rows with TARGET classes
+                    train = train[train[st.session_state.simbad_type].isin(
+                        TARGET)].copy()
+                    val = val[val[st.session_state.simbad_type].isin(
+                        TARGET)].copy()
+                    test = test[test[st.session_state.simbad_type].isin(
+                        TARGET)].copy()
+
+                    # Then assign the labels (since all remaining rows are in TARGET)
+                    for d in (train, val, test):
+                        d.loc[:, 'label'] = d[st.session_state.simbad_type]
 
                     parameters_classification['classes'] = list(
-                        dict.fromkeys(TARGET + [OTHER]))
+                        dict.fromkeys(TARGET))
 
                     # size of traim, val, test
                     st.write(
@@ -1941,13 +1954,11 @@ if st.session_state.SOM_loaded:
                     som_map_id_val = download_activation_response(
                         st.session_state.som_classification, val_x_Y_index)
 
-                    '''
                     with st.spinner('Getting classification analysis from splits...'):
                         analysis_from_splits = get_classification_analysis_from_splits(
                             som_map_id_train, som_map_id_val, som_map_id_test, train, val, test, parameters_classification, dim, st.session_state.som_classification)
                     st.write(
                         analysis_from_splits['best_by_floor'])
-                    '''
 
                     out = get_classification(
                         som_map_id_train, som_map_id_test, som_map_id_val, dataset_toclassify, dataset_toclassify_with_crossmatch, train, val, test, parameters_classification, dim, st.session_state.som_classification)
