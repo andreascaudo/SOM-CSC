@@ -1943,19 +1943,19 @@ if st.session_state.SOM_loaded:
 
                     # add a loader to train the SOM
                     with st.spinner('Training the SOM for classification...'):
-                        if not os.path.exists("/Users/andre/Desktop/INAF/USA/dataset/code/SOM/SOM-CSC/models/SOM_classification.pkl"):
+                        if not os.path.exists("./models/SOM_classification.pkl"):
                             st.write(
                                 "Model not found, Training the SOM for classification...")
                             st.session_state.som_classification = train_som(train_x_Y, dim, dim, len(features), sigma,
                                                                             learning_rate, iterations, topology, seed)
                             # save the SOM for classification in a file
-                            with open("/Users/andre/Desktop/INAF/USA/dataset/code/SOM/SOM-CSC/models/SOM_classification.pkl", "wb") as f:
+                            with open("/models/SOM_classification.pkl", "wb") as f:
                                 pickle.dump(
                                     st.session_state.som_classification, f)
                         else:
                             st.write(
                                 "Model found, Loading the SOM for classification...")
-                            with open("/Users/andre/Desktop/INAF/USA/dataset/code/SOM/SOM-CSC/models/SOM_classification.pkl", "rb") as f:
+                            with open("./models/SOM_classification.pkl", "rb") as f:
                                 st.session_state.som_classification = pickle.load(
                                     f)
 
