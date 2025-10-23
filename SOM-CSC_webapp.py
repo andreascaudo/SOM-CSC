@@ -1817,20 +1817,10 @@ if st.session_state.SOM_loaded:
                     'Alpha', 0.0, 3.0, 2.0, help='Alpha')
                 parameters_classification['GAMMA'] = st.slider(
                     'Gamma', 0.0, 1.0, 0.5, help='Gamma')
+                parameters_classification['SIGMA_F'] = st.slider(
+                    'Sigma F', 0.0, 0.0886*1.5, 0.0886, help='Sigma F')
                 parameters_classification['WINDOWS'] = st.multiselect(
-                    'Windows', [3, 5, 7], default=[3, 5, 7], help='Windows')
-
-                # Ensure "Other" is even considered
-                # parameters_classification.setdefault('OTHER_LABEL', 'Other')
-                '''
-                # Purity: from MIN_PURITY up to 1.0
-                parameters_classification['OTHER_PURITY_MIN'] = st.slider(
-                    'Other Purity Min', 0.0, 1.0, 0.5, help='Other Purity Min')
-
-                # Other Margin Min
-                parameters_classification['OTHER_MARGIN_MIN'] = st.slider(
-                    'Other Margin Min', 0.0, 0.5, 0.1, help='Other Margin Min')
-                '''
+                    'Windows', [3, 5, 7, 9], default=[3, 5, 7], help='Windows')
 
                 dataset_choice = st.radio(
                     'Choose the dataset', ['Use the main dataset', 'Upload a new dataset'])
@@ -1876,30 +1866,44 @@ if st.session_state.SOM_loaded:
                         dataset_toclassify_with_crossmatch, id_name_type_with_crossmatch, on="id", how="left")
 
                     # split it into train, val, test, but be cafeful to not have source leakage (use stratified group kfold)
+                    # keep variable names: dataset_toclassify_with_crossmatch, sgkf, fold, train, val, test
                     sgkf = StratifiedGroupKFold(
-                        n_splits=10, shuffle=True, random_state=42)
+                        n_splits=20, shuffle=True, random_state=42)
                     fold = np.empty(
                         len(dataset_toclassify_with_crossmatch), dtype=int)
-                    for k, (_, test_idx) in enumerate(sgkf.split(X=np.zeros(len(dataset_toclassify_with_crossmatch)), y=dataset_toclassify_with_crossmatch[st.session_state.simbad_type], groups=dataset_toclassify_with_crossmatch["name"])):
+
+                    for k, (_, test_idx) in enumerate(
+                        sgkf.split(
+                            X=np.zeros(
+                                len(dataset_toclassify_with_crossmatch)),
+                            y=dataset_toclassify_with_crossmatch[st.session_state.simbad_type],
+                            groups=dataset_toclassify_with_crossmatch["name"]
+                        )
+                    ):
                         fold[test_idx] = k
+
+                    dataset_toclassify_with_crossmatch = dataset_toclassify_with_crossmatch.copy()
                     dataset_toclassify_with_crossmatch["fold"] = fold
-                    train = dataset_toclassify_with_crossmatch[dataset_toclassify_with_crossmatch.fold.isin(
-                        {0, 1, 2, 3, 4, 5, 6})].copy()
-                    val = dataset_toclassify_with_crossmatch[dataset_toclassify_with_crossmatch.fold.isin({
-                        7})].copy()
-                    test = dataset_toclassify_with_crossmatch[dataset_toclassify_with_crossmatch.fold.isin({
-                        8, 9})].copy()
+
+                    # 0–13 ≈70% train, 14–16 ≈15% val, 17–19 ≈15% test
+                    train = dataset_toclassify_with_crossmatch[
+                        dataset_toclassify_with_crossmatch.fold.isin(
+                            set(range(0, 14)))
+                    ].copy()
+                    val = dataset_toclassify_with_crossmatch[
+                        dataset_toclassify_with_crossmatch.fold.isin(
+                            set(range(14, 17)))
+                    ].copy()
+                    test = dataset_toclassify_with_crossmatch[
+                        dataset_toclassify_with_crossmatch.fold.isin(
+                            set(range(17, 20)))
+                    ].copy()
 
                     assert set(train.name) & set(val.name) == set()
                     assert set(train.name) & set(test.name) == set()
                     assert set(val.name) & set(test.name) == set()
 
                     TARGET = parameters_classification['classes']
-                    # OTHER = 'Other'
-
-                    '''for d in (train, val, test):
-                        d.loc[:, 'label'] = np.where(d[st.session_state.simbad_type].isin(
-                            TARGET), d[st.session_state.simbad_type], OTHER)'''
 
                     # Filter each dataset to keep only rows with TARGET classes
                     train = train[train[st.session_state.simbad_type].isin(
@@ -1939,8 +1943,22 @@ if st.session_state.SOM_loaded:
 
                     # add a loader to train the SOM
                     with st.spinner('Training the SOM for classification...'):
-                        st.session_state.som_classification = train_som(train_x_Y, dim, dim, len(features), sigma,
-                                                                        learning_rate, iterations, topology, seed)
+                        if not os.path.exists("/Users/andre/Desktop/INAF/USA/dataset/code/SOM/SOM-CSC/models/SOM_classification.pkl"):
+                            st.write(
+                                "Model not found, Training the SOM for classification...")
+                            st.session_state.som_classification = train_som(train_x_Y, dim, dim, len(features), sigma,
+                                                                            learning_rate, iterations, topology, seed)
+                            # save the SOM for classification in a file
+                            with open("/Users/andre/Desktop/INAF/USA/dataset/code/SOM/SOM-CSC/models/SOM_classification.pkl", "wb") as f:
+                                pickle.dump(
+                                    st.session_state.som_classification, f)
+                        else:
+                            st.write(
+                                "Model found, Loading the SOM for classification...")
+                            with open("/Users/andre/Desktop/INAF/USA/dataset/code/SOM/SOM-CSC/models/SOM_classification.pkl", "rb") as f:
+                                st.session_state.som_classification = pickle.load(
+                                    f)
+
                         # print QE and TE
                         st.write(
                             f"QE: {st.session_state.som_classification.quantization_error(train_x_Y)}")
@@ -1954,20 +1972,37 @@ if st.session_state.SOM_loaded:
                     som_map_id_val = download_activation_response(
                         st.session_state.som_classification, val_x_Y_index)
 
-                    with st.spinner('Getting classification analysis from splits...'):
-                        analysis_from_splits = get_classification_analysis_from_splits(
-                            som_map_id_train, som_map_id_val, som_map_id_test, train, val, test, parameters_classification, dim, st.session_state.som_classification)
-                    st.write(
-                        analysis_from_splits['best_by_floor'])
+                    # DEBUG
+                    #
 
+                    # sigma_f = [0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07,
+                    #           0.08, 0.0886, 0.09, 0.1, 0.11, 0.12, 0.13, 0.14, 0.15]
+                    # output = []
+
+                    # with st.spinner('Getting classification analysis from splits...'):
+                    #    for sigma_f in sigma_f:
+                    #        st.write(f"Sigma F: {sigma_f}")
+                    #        parameters_classification['SIGMA_F'] = sigma_f
+                    #        analysis_from_splits = get_classification_analysis_from_splits(
+                    #            som_map_id_train, som_map_id_val, som_map_id_test, train, val, test, parameters_classification, dim, st.session_state.som_classification)
+                    #        output.append(
+                    #            {'sigma_f': sigma_f, 'best_by_floor': analysis_from_splits['best_by_floor']})
+
+                    # st.write(output)
                     out = get_classification(
                         som_map_id_train, som_map_id_test, som_map_id_val, dataset_toclassify, dataset_toclassify_with_crossmatch, train, val, test, parameters_classification, dim, st.session_state.som_classification)
-
                     # classify = False
                     dataset_classified = out['predictions']
 
+                    # Add source column where the id matches from raw_df
+                    if 'name' in st.session_state.raw_df.columns:
+                        id_to_source = dict(
+                            zip(st.session_state.raw_df['id'], st.session_state.raw_df['name']))
+                        dataset_classified['source name'] = dataset_classified['id'].map(
+                            id_to_source)
+
                     st.session_state.dataset_classified = dataset_classified[['id', 'pred',
-                                                                              'conf', 'abstain']]
+                                                                              'conf', 'abstain', 'source name']]
 
                     classification_results = describe_classified_dataset(
                         dataset_classified)
@@ -2079,295 +2114,6 @@ if st.session_state.SOM_loaded:
                         st.write("Purity stats (kept)")
                         st.dataframe(
                             classification_results["purity_stats_assigned"])
-
-                    # OLD
-                    if classification_results['total_classified_rows'] != 0:
-                        st.header("Classification Assignment Visualization")
-
-                    # Bar chart of assigned classes (Central)
-                    if not classification_results['assigned_class_counts_central'].empty:
-                        with st.popover("Bar Chart: Central Neuron Assignments"):
-                            st.write(
-                                "Number of Detections Assigned to Each Class")
-                            fig, ax = plt.subplots(figsize=(10, 6))
-                            classification_results['assigned_class_counts_central'].plot(
-                                kind='bar', color='skyblue', edgecolor='black', ax=ax)
-                            ax.set_title(
-                                'Number of Detections Assigned to Each Class', fontsize=16)
-                            ax.set_xlabel('Assigned Class', fontsize=14)
-                            ax.set_ylabel('Number of Detections', fontsize=14)
-                            ax.grid(axis='y', alpha=0.7)
-                            ax.tick_params(axis='x', rotation=45, labelsize=12)
-                            ax.tick_params(axis='y', labelsize=12)
-                            st.pyplot(fig)
-
-                    # Histogram of confidence levels (Central)
-                    if not classification_results['all_confidences_central'].empty:
-                        with st.popover("Histogram: Central Neuron Confidence Levels"):
-                            st.write(
-                                "Histogram of Confidence Levels for Central Neurons")
-                            st.write(
-                                "Green bars represent confidence values that passed the threshold, while light red bars represent values below the threshold.")
-                            fig, ax = plt.subplots(figsize=(10, 6))
-
-                            # Create bins for the histogram
-                            # Custom bin creation with adaptive range and threshold alignment
-                            def create_adaptive_bins(data, threshold, bin_size=0.05):
-                                """
-                                Create bins with the following rules:
-                                1. Range from min to max of data
-                                2. Configurable bin size (default 0.05)
-                                3. Split bins at threshold if needed
-                                4. Adjust first/last bins if min/max don't align with bin_size
-                                """
-                                min_val = data.min()
-                                max_val = data.max()
-
-                                # Handle edge case where all data is the same
-                                if min_val == max_val:
-                                    return np.array([min_val - 0.001, min_val + 0.001])
-
-                                # Find the aligned min (floor to nearest bin_size multiple)
-                                aligned_min = np.floor(
-                                    min_val / bin_size) * bin_size
-
-                                # Find the aligned max (ceil to nearest bin_size multiple)
-                                aligned_max = np.ceil(
-                                    max_val / bin_size) * bin_size
-
-                                # Ensure we have a reasonable range
-                                if aligned_max - aligned_min < bin_size:
-                                    aligned_max = aligned_min + bin_size
-
-                                # Create bins starting from aligned_min
-                                bins = []
-                                current = aligned_min
-
-                                # Add the first bin edge - use actual min if it doesn't align
-                                if abs(min_val - aligned_min) > 1e-10:
-                                    bins.append(min_val)
-                                    # Add the next aligned boundary
-                                    if aligned_min + bin_size <= max_val:
-                                        bins.append(aligned_min + bin_size)
-                                        current = aligned_min + bin_size
-                                    else:
-                                        current = max_val
-                                else:
-                                    bins.append(aligned_min)
-                                    current = aligned_min + bin_size
-
-                                # Add regular bins until we approach the threshold
-                                while current < threshold and current < max_val:
-                                    bins.append(current)
-                                    current += bin_size
-
-                                # Handle threshold - add it if it doesn't coincide with existing bin edge
-                                if threshold >= min_val and threshold <= max_val:
-                                    if len(bins) == 0 or abs(bins[-1] - threshold) > 1e-10:
-                                        bins.append(threshold)
-
-                                # Continue adding regular bins after threshold
-                                threshold_aligned = np.ceil(
-                                    threshold / bin_size) * bin_size
-                                current = threshold_aligned
-
-                                while current < max_val:
-                                    # Only add if significantly different from threshold and previous bins
-                                    if abs(current - threshold) > 1e-10 and (len(bins) == 0 or abs(current - bins[-1]) > 1e-10):
-                                        bins.append(current)
-                                    current += bin_size
-
-                                # Add the final bin edge - use actual max if it doesn't align
-                                if len(bins) == 0 or abs(max_val - bins[-1]) > 1e-10:
-                                    bins.append(max_val)
-
-                                # Clean up and sort
-                                bins = sorted(
-                                    list(set([round(b, 10) for b in bins])))
-
-                                # Ensure we have at least 2 bin edges
-                                if len(bins) < 2:
-                                    bins = [min_val, max_val]
-
-                                return np.array(bins)
-
-                            # Get all confidence values to determine min/max
-                            all_confidence_values = classification_results[
-                                'all_confidences_central']['confidence_central']
-                            threshold = parameters_classification['confidence_threshold']
-
-                            # User option for bin size
-                            bin_size_option = st.selectbox(
-                                'Bin Width',
-                                [0.05, 0.01],
-                                index=0,
-                                help='Choose the width of histogram bins. Smaller bins provide more detail but may be noisier.'
-                            )
-
-                            # Create adaptive bins
-                            bins = create_adaptive_bins(
-                                all_confidence_values, threshold, bin_size=bin_size_option)
-
-                            # Split data into passed and failed thresholds first
-                            passed_df = classification_results['all_confidences_central'][
-                                classification_results['all_confidences_central']['passed_threshold']]
-                            failed_df = classification_results['all_confidences_central'][
-                                ~classification_results['all_confidences_central']['passed_threshold']]
-
-                            # Explanation of histogram creation methodology
-                            with st.expander("Histogram Explanation"):
-                                st.write("### Adaptive Binning")
-                                st.write(f"""
-                                **1. Standard Bin Width:** Most bins have a width of {bin_size_option} for consistent granularity.
-                                
-                                **2. Threshold Alignment:** When the confidence threshold doesn't align with regular {bin_size_option} intervals:
-                                - The bin containing the threshold is split into two parts
-                                - Example: If threshold = 0.535, the 0.53-0.54 bin becomes 0.53-0.535 and 0.535-0.54
-                                
-                                **3. Boundary Adjustment:** When minimum or maximum values don't align with {bin_size_option} intervals:
-                                - First/last bins are adjusted to start/end at actual data boundaries
-                                - Example: If minimum = 0.347, first bin becomes 0.347-0.35 (width = 0.003)
-                                
-                                **4. Clean Separation:** Data is strictly separated at the threshold:
-                                - Pink bars: Confidence ≤ threshold (failed classification)
-                                - Green bars: Confidence > threshold (successful classification)
-                                """)
-
-                            # Plot both histograms with improved handling and strict separation
-                            if not failed_df.empty:
-                                # Plot values below threshold - only use bins up to and including threshold
-                                below_threshold_data = failed_df['confidence_central'].values
-                                # Include threshold bin
-                                below_threshold_bins = bins[bins <=
-                                                            threshold + 1e-10]
-
-                                counts_below, bin_edges, patches = ax.hist(below_threshold_data,
-                                                                           bins=below_threshold_bins,
-                                                                           color='lightcoral',
-                                                                           edgecolor='black',
-                                                                           alpha=0.5,
-                                                                           label='Below Threshold',
-                                                                           align='mid')
-
-                            if not passed_df.empty:
-                                # Plot values above threshold - only use bins greater than threshold
-                                above_threshold_data = passed_df['confidence_central'].values
-                                # Exclude threshold bin
-                                above_threshold_bins = bins[bins >
-                                                            threshold - 1e-10]
-
-                                counts_above, bin_edges, patches = ax.hist(above_threshold_data,
-                                                                           bins=above_threshold_bins,
-                                                                           color='green',
-                                                                           edgecolor='black',
-                                                                           alpha=0.7,
-                                                                           label='Above Threshold',
-                                                                           align='mid')
-
-                            # Add a vertical line at the threshold
-                            ax.axvline(x=parameters_classification['confidence_threshold'],
-                                       color='red', linestyle='--', linewidth=2,
-                                       label=f'Threshold ({parameters_classification["confidence_threshold"]})')
-
-                            ax.set_title(
-                                'Histogram of Assignment Confidence Levels (Central)', fontsize=16)
-                            ax.set_xlabel('Confidence Level', fontsize=14)
-                            ax.set_ylabel('Number of Detections', fontsize=14)
-                            ax.grid(axis='y', alpha=0.7)
-                            ax.legend()
-
-                            # Ensure proper x-axis limits to show all data
-                            ax.set_xlim(all_confidence_values.min(
-                            ) - 0.01, all_confidence_values.max() + 0.01)
-
-                            st.pyplot(fig)
-
-                    # Bar chart of assigned classes (Neighbor)
-                    if not classification_results['assigned_class_counts_neighbor'].empty:
-                        with st.popover("Bar Chart: Neighbor Neuron Assignments"):
-                            st.write(
-                                "Number of Detections Assigned to Each Class (Neighbor)")
-                            fig, ax = plt.subplots(figsize=(10, 6))
-                            classification_results['assigned_class_counts_neighbor'].plot(
-                                kind='bar', color='skyblue', edgecolor='black', width=0.8, ax=ax)
-                            ax.set_title(
-                                'Number of Detections Assigned to Each Class (Neighbor)', fontsize=16)
-                            ax.set_xlabel('Assigned Class', fontsize=14)
-                            ax.set_ylabel('Number of Detections', fontsize=14)
-                            ax.grid(axis='y', alpha=0.7)
-                            ax.tick_params(axis='x', rotation=45, labelsize=12)
-                            ax.tick_params(axis='y', labelsize=12)
-                            st.pyplot(fig)
-
-                    # Histogram of confidence levels (Neighbor)
-                    if not classification_results['all_confidences_neighbor'].empty:
-                        # Histogram of confidence levels (Neighbor)
-                        with st.popover("Histogram: Neighbor Neuron Confidence Levels"):
-                            st.write(
-                                "Histogram of Confidence Levels for Neighbor Neurons")
-                            st.write(
-                                "Green bars represent confidence values that passed the threshold, while light red bars represent values below the threshold.")
-                            fig, ax = plt.subplots(figsize=(10, 6))
-
-                            # Split data into passed and failed thresholds
-                            passed_df = classification_results['all_confidences_neighbor'][
-                                classification_results['all_confidences_neighbor']['passed_threshold']]
-                            failed_df = classification_results['all_confidences_neighbor'][
-                                ~classification_results['all_confidences_neighbor']['passed_threshold']]
-
-                            # Create bins for the histogram - neighbor uses integer values (count of neighbors)
-                            max_neighbors = 6  # Maximum number of neighbors in hexagonal grid
-                            # Create standard integer-centered bins
-                            bins = np.arange(-0.5, max_neighbors + 1.5, 1)
-
-                            # Define the threshold value for classification
-                            threshold = parameters_classification['neighbor_majority_threshold']
-
-                            # Plot both histograms with a clearer visual distinction
-                            if not failed_df.empty:
-                                # Plot values below threshold
-                                below_threshold_mask = failed_df['confidence_neighbor'] < threshold
-                                if below_threshold_mask.any():
-                                    ax.hist(failed_df['confidence_neighbor'][below_threshold_mask],
-                                            bins=bins,
-                                            color='lightcoral',
-                                            edgecolor='black',
-                                            alpha=0.5,
-                                            label='Below Threshold')
-
-                            if not passed_df.empty:
-                                # Plot values above threshold
-                                above_threshold_mask = passed_df['confidence_neighbor'] >= threshold
-                                if above_threshold_mask.any():
-                                    ax.hist(passed_df['confidence_neighbor'][above_threshold_mask],
-                                            bins=bins,
-                                            color='green',
-                                            edgecolor='black',
-                                            alpha=0.7,
-                                            label='Above Threshold')
-
-                            # Add a vertical line at the threshold
-                            # Position the line between bars to avoid cutting through a bar
-                            threshold = parameters_classification['neighbor_majority_threshold']
-                            # For integer thresholds, place line 0.5 below
-                            # For non-integer thresholds, place line at the threshold
-                            threshold_line_position = threshold - \
-                                0.5 if threshold == int(
-                                    threshold) else threshold
-                            ax.axvline(x=threshold_line_position,
-                                       color='red', linestyle='--',
-                                       label=f'Threshold ({int(threshold) if threshold == int(threshold) else threshold})')
-
-                            ax.set_title(
-                                'Histogram of Assignment Confidence Levels (Neighbor)', fontsize=16)
-                            ax.set_xlabel(
-                                'Number of Neighbors with Same Class', fontsize=14)
-                            ax.set_ylabel('Number of Detections', fontsize=14)
-                            ax.set_xlim([0, max_neighbors + 1])
-                            ax.set_xticks(range(max_neighbors + 1))
-                            ax.grid(axis='y', alpha=0.7)
-                            ax.legend()
-                            st.pyplot(fig)
 
     enable_download = st.checkbox("Enable Downloads", value=False,
                                   help="Check this box to enable download options for the SOM model and datasets.", key="apply_download")

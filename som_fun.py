@@ -3090,6 +3090,7 @@ def get_classification_analysis_from_splits(
     test,                 # same cols as train
     parameters_classification,
     dim,                  # SOM width/height (square)
+    som_classification,   # MiniSom with .get_weights()
     show_test=False       # keep prints for TEST hidden unless asked
 ):
     """
@@ -3098,17 +3099,13 @@ def get_classification_analysis_from_splits(
       • BMUs for train/val/test were computed with that frozen SOM and passed in here.
       • We build hist/posteriors from TRAIN labels only, grid-search on VAL once,
         select best per coverage floor in {0.5,0.6,0.7,0.8,0.9}, and evaluate on TEST.
-    Returns:
-      {
-        "classes": [...],
-        "windows": [...],
-        "val_runs": [ {params, coverage, macro_f1, per_class_f1, n_kept, n_total}, ... ],
-        "best_by_floor": {
-            0.5: { "params": {...}, "val_metrics": {...}, "test_metrics": {...}, "val_confusion": df, "test_confusion": df or None },
-            ...
-        }
-      }
+
+    This version uses feature-space distance–weighted neighborhood aggregation:
+      weighted sum at cell (i,j) over a k×k neighborhood:
+        sum_{nb in k×k} exp(-||w_nb - w_ij||^2 / (2 * sigma_f^2)) * counts[nb]
+      where w_* are SOM prototype vectors. sigma_f can be auto-estimated.
     """
+    import time
     import numpy as np
     import pandas as pd
     from itertools import product
@@ -3117,56 +3114,61 @@ def get_classification_analysis_from_splits(
     # --------------------- params & classes ---------------------
     params = parameters_classification or {}
     CLASSES = list(params.get("classes", ["QSO", "YSO", "Star"]))
-
-    # OTHER_LABEL = params.get("OTHER_LABEL", "Other")
     WINDOWS = list(params.get("WINDOWS", [3, 5, 7]))
     WINDOWS = sorted({int(k) for k in WINDOWS if int(k) %
                      2 == 1 and int(k) >= 3})
 
+    # NEW: distance-kernel width in feature space (0/None -> auto)
+    SIGMA_F = params.get("SIGMA_F", 0.0)
+
     GRID = {
-        # Support: evita 0, resta permissivo con rari ma non troppo
         "MIN_SUPPORT":  [1, 3, 5, 10, 20, 100],
-
-        # Purity: fascia che hai visto funzionare + un minimo più alto
         "MIN_PURITY":   [0.2, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.6, 0.7, 0.8, 0.9],
-
-        # Margin: piccoli salti fino a 0.15
         "MARGIN":       [0.03, 0.05, 0.08, 0.10, 0.12, 0.15, 0.20, 0.25, 0.30],
-
-        # Laplace smoothing
         "ALPHA":        [0.5, 1.0, 1.5, 2.0],
-
-        # Reweighting (boost ai rari): includi anche 1.0 per boost forte
         "GAMMA":        [0.3, 0.5, 0.7, 1.0, 1.5, 2.0],
     }
 
-    '''
-    GRID = {
-        # Support: always 1 in your winners; keep 2 as a guard-rail
-        "MIN_SUPPORT": [1],
-
-        # Purity: sweet spot ~0.4–0.5; include 0.35 and 0.3 for high-coverage regimes
-        # and 0.55 for a tad more precision at lower coverage floors.
-        "MIN_PURITY":  [0.2, 0.30, 0.35, 0.40, 0.45],
-
-        # Margin: match the staircase you observed; no need for the dense list
-        "MARGIN":      [0.05, 0.08, 0.10, 0.12, 0.15, 0.18, 0.2, 0.25],
-
-        # Laplace: you saw 0.5, 1.0, 2.0 all matter
-        "ALPHA":       [0.5, 1.0, 1.5, 2.0],
-
-        # Reweighting: 0.5 dominated; 0.7 and 0.3 sometimes useful
-        "GAMMA":       [0.3, 0.5],
-
-        # Be stricter on "Other": small, focused ranges
-        # 0.0 ⇒ uses MIN_PURITY
-        "OTHER_PURITY_MIN": [0.3, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.7],
-        # 0.0 ⇒ uses MARGIN
-        "OTHER_MARGIN_MIN": [0.02, 0.03, 0.04],
-    }
-    '''
-
     COVERAGE_FLOORS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+
+    # --------------------- prototypes from MiniSom ---------------------
+    # Expect shape (W, H, D)
+    try:
+        Wproto = som_classification.get_weights()
+    except AttributeError:
+        Wproto = getattr(som_classification, "_weights")  # fallback
+    assert Wproto.ndim == 3, "SOM weights must be 3D (W,H,D)"
+
+    # Use prototype grid size as source of truth
+    Wp, Hp, Dp = Wproto.shape
+    W = int(dim)
+    H = int(dim)
+    assert (Wp, Hp) == (
+        W, H), f"dim={dim} disagrees with SOM weights ({Wp}x{Hp})"
+
+    # --- helper to auto-estimate sigma_f (median adjacent prototype distance) ---
+    def _estimate_sigma_f(weights):
+        Wd, Hd, D = weights.shape
+        d = []
+        # right neighbors
+        diff = weights[1:, :, :] - weights[:-1, :, :]
+        d.append(np.sqrt(np.sum(diff * diff, axis=2)).ravel())
+        # down neighbors
+        diff = weights[:, 1:, :] - weights[:, :-1, :]
+        d.append(np.sqrt(np.sum(diff * diff, axis=2)).ravel())
+        d = np.concatenate(d)
+        d = d[np.isfinite(d) & (d > 0)]
+        return float(np.median(d)) if d.size else 1.0
+
+    # Estimated SIGMA_F: 0.08860525228369548
+    '''
+    if (SIGMA_F is None) or (float(SIGMA_F) <= 0):
+        SIGMA_F = _estimate_sigma_f(Wproto)
+        print(f"[INFO] Estimated SIGMA_F={SIGMA_F:.6f}")
+    '''
+    if SIGMA_F > 0:
+        SIGMA_F = float(SIGMA_F)
+        inv_two_sigma2 = 1.0 / (2.0 * (SIGMA_F ** 2) + 1e-12)
 
     # --------------------- map ids -> BMUs per split ---------------------
     def _mk_map(som_map_id):
@@ -3178,7 +3180,6 @@ def get_classification_analysis_from_splits(
     id_to_pos_val = _mk_map(som_map_id_val)
     id_to_pos_test = _mk_map(som_map_id_test)
 
-    # attach BMUs; assert none missing, keep alignment
     def _attach_bmu(df, mp, split_name):
         df = df.copy()
         df["bmu"] = df["id"].map(mp)
@@ -3198,18 +3199,14 @@ def get_classification_analysis_from_splits(
     test = test[test["label"].isin(CLASSES)].reset_index(drop=True)
 
     # --------------------- train-only histograms ---------------------
-    W = int(dim)
-    H = int(dim)
     K = len(CLASSES)
     cls_to_idx = {c: i for i, c in enumerate(CLASSES)}
     hist = np.zeros((W, H, K), dtype=np.float64)
-
     for _, r in train.iterrows():
         hist[int(r.bmu_x), int(r.bmu_y), cls_to_idx[r.label]] += 1.0
-
     class_counts = hist.sum(axis=(0, 1))
 
-    # --------------------- surfaces (reweight + spatial + Laplace) ---------------------
+    # --------------------- neighborhood aggregations ---------------------
     def smooth_box(arr, k=3, mode="edge"):
         assert k % 2 == 1
         r = k // 2
@@ -3221,12 +3218,43 @@ def get_classification_analysis_from_splits(
                 out[i, j, :] = pad[i:i+k, j:j+k, :].sum(axis=(0, 1))
         return out
 
-    _SURF_CACHE = {}
+    # NEW: feature-distance–weighted box sum (Gaussian in feature space)
+    def weighted_box_sum_feature(arr, k, weights_proto):
+        """arr: (W,H,K) class counts (already reweighted); weights_proto: (W,H,D)"""
+        assert k % 2 == 1
+        r = k // 2
+        Wd, Hd, Kd = arr.shape
+
+        arr_pad = np.pad(arr, ((r, r), (r, r), (0, 0)), mode="edge")
+        I, J = np.meshgrid(np.arange(Wd), np.arange(Hd), indexing="ij")
+        ij = np.stack([I, J], axis=2)                   # (W,H,2)
+        ij_pad = np.pad(ij, ((r, r), (r, r), (0, 0)), mode="edge")
+
+        out = np.empty_like(arr)
+        for i in range(Wd):
+            for j in range(Hd):
+                idx = ij_pad[i:i+k, j:j+k, :]           # (k,k,2)
+                nb_i = idx[..., 0]
+                nb_j = idx[..., 1]
+
+                w_c = weights_proto[i, j, :]           # (D,)
+                w_nb = weights_proto[nb_i, nb_j, :]     # (k,k,D)
+                diff = w_nb - w_c[None, None, :]
+                dist2 = np.sum(diff * diff, axis=2)     # (k,k)
+                ker = np.exp(-dist2 * inv_two_sigma2)   # (k,k)
+
+                block = arr_pad[i:i+k, j:j+k, :]        # (k,k,K)
+                out[i, j, :] = (ker[..., None] * block).sum(axis=(0, 1))
+        return out
+
+    _SURF_CACHE = {}  # cache per (ALPHA,GAMMA,WINDOWS,SIGMA_F)
 
     def build_surfaces(ALPHA, GAMMA, windows):
-        key = (float(ALPHA), float(GAMMA), tuple(windows))
+        key = (float(ALPHA), float(GAMMA), tuple(windows), float(SIGMA_F))
         if key in _SURF_CACHE:
             return _SURF_CACHE[key]
+
+        # class reweighting (tempered inverse freq)
         eps = 1e-9
         mean_c = class_counts.mean() + eps
         w = (mean_c / (class_counts + eps)) ** float(GAMMA)
@@ -3234,15 +3262,23 @@ def get_classification_analysis_from_splits(
 
         post_list, support_list, purity_list = [], [], []
         for k in windows:
-            hsum = smooth_box(hist_bal, k=k, mode="edge")
+            # NEW: use feature-distance kernel if sigma_f > 0, else fallback to box sum
+            if SIGMA_F > 0:
+                hsum = weighted_box_sum_feature(hist_bal, k, Wproto)
+            else:
+                hsum = smooth_box(hist_bal, k=k, mode="edge")
+
             supp = hsum.sum(axis=2)
             p = (hsum + float(ALPHA))
             p /= p.sum(axis=2, keepdims=True)
             post_list.append(p)
             support_list.append(supp)
             purity_list.append(p.max(axis=2))
-        S = {"post_list": post_list, "support_list": support_list,
-             "purity_list": purity_list, "windows": list(windows)}
+
+        S = {"post_list": post_list,
+             "support_list": support_list,
+             "purity_list": purity_list,
+             "windows": list(windows)}
         _SURF_CACHE[key] = S
         return S
 
@@ -3252,9 +3288,6 @@ def get_classification_analysis_from_splits(
         MIN_PURITY = float(params["MIN_PURITY"])
         MARGIN = float(params.get("MARGIN", 0.0))
 
-        # OTHER_PURITY_MIN = float(params.get("OTHER_PURITY_MIN", 0.80))
-        # OTHER_MARGIN_MIN = float(params.get("OTHER_MARGIN_MIN", 0.10))
-
         post_list, support_list, purity_list = S["post_list"], S["support_list"], S["purity_list"]
 
         rows = []
@@ -3263,6 +3296,7 @@ def get_classification_analysis_from_splits(
             chosen = 0
             while chosen + 1 < len(support_list) and support_list[chosen][x, y] < MIN_SUPPORT:
                 chosen += 1
+
             if support_list[chosen][x, y] == 0:
                 rows.append((r[label_col], None, 0.0, True))
                 continue
@@ -3275,26 +3309,13 @@ def get_classification_analysis_from_splits(
             pred = CLASSES[int(p.argmax())]
 
             supp = float(support_list[chosen][x, y])
-
-            abst = (supp < MIN_SUPPORT)
-
-            if not abst:
-                '''
-                if pred == OTHER_LABEL:
-                    # "Other" must meet the stricter of the two thresholds
-                    pur_req = max(MIN_PURITY, OTHER_PURITY_MIN)
-                    margin_req = max(MARGIN, OTHER_MARGIN_MIN)
-                    abst = (pur < pur_req) or (margin < margin_req)
-                else:
-                    '''
-                # normal classes
-                abst = (pur < MIN_PURITY) or (margin < MARGIN)
+            abst = (supp < MIN_SUPPORT) or (
+                pur < MIN_PURITY) or (margin < MARGIN)
 
             if abst:
-                pred = None
-                conf = 0.0
+                pred, conf = None, 0.0
 
-            rows.append((r[label_col], None if abst else pred, conf, abst))
+            rows.append((r[label_col], pred, conf, abst))
 
         return pd.DataFrame(rows, columns=["true", "pred", "conf", "abstain"])
 
@@ -3322,15 +3343,13 @@ def get_classification_analysis_from_splits(
         for values in product(*(grid[k] for k in keys)):
             yield dict(zip(keys, values))
 
-    # how many total combos
     TOTAL = 1
     for k, vals in GRID.items():
         TOTAL *= len(vals)
+
     t0 = time.time()
     all_runs = []
     for i, p in enumerate(grid_iter(GRID), start=1):
-        # start time
-        start_time = time.time()
         S = build_surfaces(p.get("ALPHA", 1.0), p.get("GAMMA", 0.0), WINDOWS)
         res_val = predict_split(val, p, S, label_col="label")
         m = compute_metrics(res_val)
@@ -3338,7 +3357,7 @@ def get_classification_analysis_from_splits(
 
         if i % 1000 == 0 or i == TOTAL:
             elapsed = time.time() - t0
-            eta = (TOTAL - i) * (elapsed / i)   # simple avg-based ETA
+            eta = (TOTAL - i) * (elapsed / i) if i > 0 else 0.0
             print(f"{i}/{TOTAL} done | ETA: {int(eta)}s (~{eta/60:.1f} min)")
 
     # --------------------- pick best per coverage floor & evaluate TEST ---------------------
@@ -3349,15 +3368,12 @@ def get_classification_analysis_from_splits(
         best = max(pool, key=lambda r: (
             r["macro_f1"], r["coverage"], r["n_kept"]))
 
-        # Evaluate on TEST with same params
         pbest = best["params"]
         S_best = build_surfaces(pbest.get("ALPHA", 1.0),
                                 pbest.get("GAMMA", 0.0), WINDOWS)
-
         res_test = predict_split(test, pbest, S_best, label_col="label")
         mtest = compute_metrics(res_test)
 
-        # Optional prints
         print(f"\nCoverage floor: {floor:.1f}")
         print(f"=== BEST ON VALIDATION ===")
         print(f"Macro-F1: {best['macro_f1']:.3f} | Coverage: {best['coverage']:.3f} "
@@ -3366,19 +3382,23 @@ def get_classification_analysis_from_splits(
         if best["confusion"] is not None:
             print("VAL Confusion (kept only):\n",
                   best["confusion"].to_string())
-        if show_test:
+            cm = best["confusion"].to_numpy()
+            micro_f1 = (np.trace(cm) / cm.sum()
+                        ) if cm.sum() > 0 else 0.0
+            best["micro_f1"] = micro_f1
+        if show_test and mtest["confusion"] is not None:
             print(f"[TEST] Macro-F1: {mtest['macro_f1']:.3f} | Coverage: {mtest['coverage']:.3f} "
                   f"({mtest['n_kept']}/{mtest['n_total']})")
-            if mtest["confusion"] is not None:
-                print("TEST Confusion (kept only):\n",
-                      mtest["confusion"].to_string())
+            print("TEST Confusion (kept only):\n",
+                  mtest["confusion"].to_string())
 
         best_by_floor[floor] = {
             "params": pbest,
             "val_metrics": {k: best[k] for k in ("coverage", "macro_f1", "per_class_f1", "n_kept", "n_total")},
             "val_confusion": best["confusion"],
-            "test_metrics": {k: mtest[k] for k in ("coverage", "macro_f1", "per_class_f1", "n_kept", "n_total")},
-            "test_confusion": mtest["confusion"],
+            "val_accuracy": best["micro_f1"],
+            # "test_metrics": {k: mtest[k] for k in ("coverage", "macro_f1", "per_class_f1", "n_kept", "n_total")},
+            # "test_confusion": mtest["confusion"],
         }
 
     return {
@@ -3400,7 +3420,7 @@ def get_classification(
     test,
     parameters_classification,
     dim,
-    som,
+    som_classification,
 ):
     '''
     # Get only flat
@@ -3448,12 +3468,7 @@ def get_classification(
     ALPHA = float(params.get("ALPHA", 2.0))
     GAMMA = float(params.get("GAMMA", 0.5))
     WINDOWS = list(params.get("WINDOWS", [3, 5, 7]))
-
-    '''
-    OTHER_LABEL = params.get("OTHER_LABEL", "Other")
-    OTHER_PURITY_MIN = float(params.get("OTHER_PURITY_MIN", 0.80))
-    OTHER_MARGIN_MIN = float(params.get("OTHER_MARGIN_MIN", 0.10))
-    '''
+    SIGMA_F = params.get("SIGMA_F", 0.0)  # 0 / None -> auto-estimate
 
     _ = bool(params.get("report_validation", True))  # retained for API compat
 
@@ -3496,6 +3511,14 @@ def get_classification(
     W = dim
     H = dim
 
+    # --------------------- prototypes from MiniSom ---------------------
+    # Expect (W, H, D).
+    try:
+        Wproto = som_classification.get_weights()
+    except AttributeError:
+        Wproto = getattr(som_classification, "_weights")  # fallback
+    assert Wproto.ndim == 3, "SOM weights must be 3D (W,H,D)"
+
     # --------------------- histograms from TRAIN only ---------------------
     K = len(CLASSES)
     cls_to_idx = {c: i for i, c in enumerate(CLASSES)}
@@ -3517,16 +3540,87 @@ def get_classification(
                 out[i, j, :] = pad[i:i+k, j:j+k, :].sum(axis=(0, 1))
         return out
 
+    # --------------------- weighted neighborhood surfaces -----------------
+    # We’ll compute a *feature-distance–weighted* window sum for each k.
+    # To mimic your 'edge' padding behavior, we pad both the counts and an index map.
+
+    def weighted_box_sum_feature(arr, k, weights_proto):
+        """arr: (W,H,K) class counts (balanced); weights_proto: (W,H,D)."""
+        assert k % 2 == 1
+        r = k // 2
+        Wd, Hd, Kd = arr.shape
+        D = weights_proto.shape[2]
+
+        # pad counts with 'edge' (replicates border)
+        arr_pad = np.pad(arr, ((r, r), (r, r), (0, 0)), mode="edge")
+
+        # pad an index map so we know which original (i,j) each padded cell mirrors
+        I, J = np.meshgrid(np.arange(Wd), np.arange(Hd), indexing="ij")
+        ij = np.stack([I, J], axis=2)  # (W,H,2)
+        ij_pad = np.pad(ij, ((r, r), (r, r), (0, 0)), mode="edge")
+
+        out = np.empty_like(arr)
+        for i in range(Wd):
+            for j in range(Hd):
+                # kxk block of original indices (taking padding mirroring into account)
+                nb_idx = ij_pad[i:i+k, j:j+k, :]  # (k,k,2)
+                nb_i = nb_idx[..., 0]
+                nb_j = nb_idx[..., 1]
+
+                # prototypes
+                w_c = weights_proto[i, j, :]                        # (D,)
+                w_nb = weights_proto[nb_i, nb_j, :]                 # (k,k,D)
+                diff = w_nb - w_c[None, None, :]
+                dist2 = np.sum(diff * diff, axis=2)                 # (k,k)
+                ker = np.exp(-dist2 * inv_two_sigma2)               # (k,k)
+
+                # counts block and weighted sum
+                block = arr_pad[i:i+k, j:j+k, :]                    # (k,k,K)
+                out[i, j, :] = (ker[..., None] * block).sum(axis=(0, 1))
+
+        return out
+
     # tempered class reweighting
     eps = 1e-9
     mean_c = class_counts.mean() + eps
     w = (mean_c / (class_counts + eps)) ** GAMMA
     hist_bal = hist * w.reshape(1, 1, -1)
 
+    # --------------------- helper: auto-estimate SIGMA_F ------------------
+
+    def _estimate_sigma_f(weights):
+        # median distance among immediate (Manhattan-1) neighbors
+        Wd, Hd, D = weights.shape
+        dists = []
+        # right neighbors
+        diff = weights[1:, :, :] - weights[:-1, :, :]
+        dists.append(np.sqrt(np.sum(diff * diff, axis=2)).ravel())
+        # down neighbors
+        diff = weights[:, 1:, :] - weights[:, :-1, :]
+        dists.append(np.sqrt(np.sum(diff * diff, axis=2)).ravel())
+        d = np.concatenate(dists)
+        d = d[np.isfinite(d) & (d > 0)]
+        if d.size == 0:
+            return 1.0
+        return float(np.median(d))
+
+    # Estimated SIGMA_F: 0.08860525228369548
+    '''
+    if (SIGMA_F is None) or (float(SIGMA_F) <= 0):
+        SIGMA_F = _estimate_sigma_f(Wproto)
+        st.write(f"Estimated SIGMA_F: {SIGMA_F}")
+    '''
+    if SIGMA_F > 0:
+        SIGMA_F = float(SIGMA_F)
+        inv_two_sigma2 = 1.0 / (2.0 * (SIGMA_F ** 2) + 1e-12)
+
     # precompute per-window sums and posteriors
     hist_s_list, support_list, post_list, purity_list = [], [], [], []
     for k in WINDOWS:
-        hsum = box_sum(hist_bal, k, pad_mode="edge")
+        if SIGMA_F > 0:
+            hsum = weighted_box_sum_feature(hist_bal, k, Wproto)
+        else:
+            hsum = box_sum(hist_bal, k, pad_mode="edge")
         hist_s_list.append(hsum)
         support_list.append(hsum.sum(axis=2))
         p = (hsum + ALPHA)
