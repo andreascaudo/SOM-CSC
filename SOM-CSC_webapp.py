@@ -171,14 +171,26 @@ st.session_state.df_index.columns = st.session_state.df_index.columns.str.replac
     '_log_norm', '')
 
 # GMM_cluster_labels = st.session_state.df['cluster']
-st.session_state.simbad_type = 'class'  # otype, main_type
-main_type = st.session_state.raw_df[st.session_state.simbad_type]
-# default_main_type = ['QSO', 'AGN', 'Seyfert_1', 'Seyfert_2', 'HMXB',
-#                     'LMXB', 'XB', 'YSO', 'TTau*', 'Orion_V*']
 
-default_main_type = ['YSO', 'Binaries', 'AGN', 'Stars']
+# set a toggle button to switch between class and main_type
+class_or_main_type = st.sidebar.checkbox(
+    'Aggregate main type classes', value=True, help='Switch between class and main type')
+if class_or_main_type:
+    st.session_state.simbad_type = 'class'
+else:
+    st.session_state.simbad_type = 'main_type'
+
+# st.session_state.simbad_type = 'class'  # otype, main_type
+main_type = st.session_state.raw_df[st.session_state.simbad_type]
+
+if class_or_main_type:
+    default_main_type = ['neoYSOs', 'Binaries', 'neoAGNs', 'Stars']
+else:
+    default_main_type = ['HighMassXBin', 'PartofG', 'QSO', 'Star', 'X', 'YSO']
+
 color_schemes = ['lightmulti', 'blueorange',
                  'viridis', 'redyellowblue', 'plasma', 'greenblue', 'redblue']
+
 
 # Now try to load the default model after data is prepared
 if 'SOM_loaded' not in st.session_state:
@@ -271,6 +283,9 @@ else:
 
     # Fix the default features selection to avoid KeyError
     default_features = features_for_selection.copy()
+
+    default = ['neoYSOs'] if class_or_main_type else ['YSO']
+    # default = ['YSO']
 
     features = st.sidebar.multiselect(
         'Features', features_for_selection, default_features, help='Select the features to be used for training the SOM.')
@@ -1540,6 +1555,24 @@ if st.session_state.SOM_loaded:
                     strokeWidth_enhanced = st.slider(
                         'Stroke Width Enhanced', 1.0, 5.0, 3.0, help='Stroke Width Enhanced')
 
+                    max_clipping_value = st.session_state.raw_df[feature].max()
+                    min_clipping_value = st.session_state.raw_df[feature].min()
+
+                    max_clipping = st.slider(
+                        'Max Clipping', min_clipping_value, max_clipping_value, max_clipping_value, help='Max Clipping')
+                    min_clipping = st.slider(
+                        'Min Clipping', min_clipping_value, max_clipping_value, min_clipping_value, help='Min Clipping')
+
+                    # let the user write down min_clipping if they want to use a different value than the default
+                    min_clipping_value = st.text_input(
+                        'Min Clipping', min_clipping_value, help='Min Clipping')
+                    if min_clipping_value != '':
+                        min_clipping = float(min_clipping_value)
+                    max_clipping_value = st.text_input(
+                        'Max Clipping', max_clipping_value, help='Max Clipping')
+                    if max_clipping_value != '':
+                        max_clipping = float(max_clipping_value)
+
                     st.write(
                         "###### Please click the 'Show Plot' button after choosing the dataset type or to display the map, in order to refresh the view.")
 
@@ -1635,7 +1668,7 @@ if st.session_state.SOM_loaded:
             else:
                 create_multi_features_plot(
                     var, scaling_options, type_option, color_scheme,
-                    feature, st.session_state.som.topology, category_map, strokeWidth_enhanced
+                    feature, st.session_state.som.topology, category_map, strokeWidth_enhanced, max_clipping, min_clipping
                 )
 
         elif (st.session_state.feature_viz_dataset_choice == 'Upload a new dataset' and
@@ -1716,7 +1749,8 @@ if st.session_state.SOM_loaded:
                     else:
                         create_multi_features_plot(
                             var, scaling_options, type_option, color_scheme,
-                            uploaded_feature_name, st.session_state.som.topology
+                            uploaded_feature_name, st.session_state.som.topology,
+                            max_clipping, min_clipping
                         )
                 else:
                     st.error(
@@ -1793,7 +1827,6 @@ if st.session_state.SOM_loaded:
                 # Set parameters
 
                 main_type_counts = main_type.value_counts()
-                default = ['YSO', 'Stars']
                 default_main_type_counts = []
                 for default in default:
                     default_main_type_counts.append(
@@ -1808,19 +1841,19 @@ if st.session_state.SOM_loaded:
                                                         for mt in main_type_selection]
 
                 parameters_classification['MIN_SUPPORT'] = st.slider(
-                    'Minimum Support', 0, 1000, 20, help='Minimum Support')
+                    'Minimum Support', 0, 1000, 1, help='Minimum Support')
                 parameters_classification['MIN_PURITY'] = st.slider(
-                    'Minimum Purity', 0.0, 1.0, 0.55, help='Minimum Purity')
+                    'Minimum Purity', 0.0, 1.0, 0.2, help='Minimum Purity')
                 parameters_classification['MARGIN'] = st.slider(
-                    'Margin', 0.0, 0.5, 0.05, help='Margin')
+                    'Margin', 0.0, 0.5, 0.3, help='Margin')
                 parameters_classification['ALPHA'] = st.slider(
-                    'Alpha', 0.0, 3.0, 2.0, help='Alpha')
+                    'Alpha', 0.0, 3.0, 0.5, help='Alpha')
                 parameters_classification['GAMMA'] = st.slider(
-                    'Gamma', 0.0, 1.0, 0.5, help='Gamma')
+                    'Gamma', 0.0, 1.0, 0.7, help='Gamma')
                 parameters_classification['SIGMA_F'] = st.slider(
-                    'Sigma F', 0.0, 0.0886*1.5, 0.0886, help='Sigma F')
+                    'Sigma F', 0.0, 0.0886*1.5, 0.05, help='Sigma F')
                 parameters_classification['WINDOWS'] = st.multiselect(
-                    'Windows', [3, 5, 7, 9], default=[3, 5, 7], help='Windows')
+                    'Windows', [1, 2, 3, 4, 5, 6, 7, 8, 9], default=[1, 2, 3, 4], help='Windows radius')
 
                 dataset_choice = st.radio(
                     'Choose the dataset', ['Use the main dataset', 'Upload a new dataset'])
@@ -1865,6 +1898,18 @@ if st.session_state.SOM_loaded:
                     dataset_toclassify_with_crossmatch = pd.merge(
                         dataset_toclassify_with_crossmatch, id_name_type_with_crossmatch, on="id", how="left")
 
+                    y_for_split = dataset_toclassify_with_crossmatch[st.session_state.simbad_type].copy(
+                    )
+                    # NOTE (reproducibility): we keep the *original* class names ONLY for the fold split.
+                    # StratifiedGroupKFold may yield slightly different group-to-fold assignments when label
+                    # strings change (due to internal label encoding / tie-breaking), even if class counts
+                    # are identical. We therefore map any renamed labels back to their legacy names here so
+                    # the folds remain *bitwise identical* to those used for the paper results. The updated
+                    # labels (e.g., "neoYSOs") are used everywhere else in the analysis and plots.
+                    # Otherwise, the folds would be different and the results would be different.
+                    y_for_split = y_for_split.replace({"neoYSOs": "YSO"})
+                    y_for_split = y_for_split.replace({"neoAGNs": "AGN"})
+
                     # split it into train, val, test, but be cafeful to not have source leakage (use stratified group kfold)
                     # keep variable names: dataset_toclassify_with_crossmatch, sgkf, fold, train, val, test
                     sgkf = StratifiedGroupKFold(
@@ -1876,7 +1921,7 @@ if st.session_state.SOM_loaded:
                         sgkf.split(
                             X=np.zeros(
                                 len(dataset_toclassify_with_crossmatch)),
-                            y=dataset_toclassify_with_crossmatch[st.session_state.simbad_type],
+                            y=y_for_split,
                             groups=dataset_toclassify_with_crossmatch["name"]
                         )
                     ):
@@ -1949,7 +1994,7 @@ if st.session_state.SOM_loaded:
                             st.session_state.som_classification = train_som(train_x_Y, dim, dim, len(features), sigma,
                                                                             learning_rate, iterations, topology, seed)
                             # save the SOM for classification in a file
-                            with open("/models/SOM_classification.pkl", "wb") as f:
+                            with open("./models/SOM_classification.pkl", "wb") as f:
                                 pickle.dump(
                                     st.session_state.som_classification, f)
                         else:
@@ -1976,7 +2021,7 @@ if st.session_state.SOM_loaded:
                     #
 
                     # sigma_f = [0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07,
-                    #           0.08, 0.0886, 0.09, 0.1, 0.11, 0.12, 0.13, 0.14, 0.15]
+                    #            0.08, 0.0886, 0.09, 0.094, 0.1, 0.1024, 0.12, 0.13, 0.14]
                     # output = []
 
                     # with st.spinner('Getting classification analysis from splits...'):
@@ -1985,10 +2030,13 @@ if st.session_state.SOM_loaded:
                     #        parameters_classification['SIGMA_F'] = sigma_f
                     #        analysis_from_splits = get_classification_analysis_from_splits(
                     #            som_map_id_train, som_map_id_val, som_map_id_test, train, val, test, parameters_classification, dim, st.session_state.som_classification)
+                    #        st.write(
+                    #            {'sigma_f': sigma_f, 'best_by_floor': analysis_from_splits['best_by_floor']})
                     #        output.append(
                     #            {'sigma_f': sigma_f, 'best_by_floor': analysis_from_splits['best_by_floor']})
 
                     # st.write(output)
+
                     out = get_classification(
                         som_map_id_train, som_map_id_test, som_map_id_val, dataset_toclassify, dataset_toclassify_with_crossmatch, train, val, test, parameters_classification, dim, st.session_state.som_classification)
                     # classify = False
@@ -2001,8 +2049,8 @@ if st.session_state.SOM_loaded:
                         dataset_classified['source name'] = dataset_classified['id'].map(
                             id_to_source)
 
-                    st.session_state.dataset_classified = dataset_classified[['id', 'pred',
-                                                                              'conf', 'abstain', 'source name']]
+                    st.session_state.dataset_classified = dataset_classified[['id', 'bmu_x', 'bmu_y', 'pred',
+                                                                              'conf', 'abstain', 'source name', 'edge_bmu', 'truncated_R']]
 
                     classification_results = describe_classified_dataset(
                         dataset_classified)
@@ -2043,6 +2091,13 @@ if st.session_state.SOM_loaded:
                         st.write(
                             "Confusion matrix (kept only — rows=true, cols=pred)")
                         st.dataframe(cm_df)
+
+                        # Confusion matrix per source
+                        cm_src_df = pd.DataFrame(
+                            metrics["confusion_matrix_per_source_mixed"])
+                        st.write(
+                            "Confusion matrix per source (kept only)")
+                        st.dataframe(cm_src_df)
 
                         # Micro-F1 / accuracy on kept
                         cm = cm_df.to_numpy()
@@ -2098,11 +2153,11 @@ if st.session_state.SOM_loaded:
 
                     st.write("### Neighborhood diagnostics")
                     # window usage (all vs kept)
-                    win_all = classification_results["window_k_counts_all"]
-                    win_kept = classification_results["window_k_counts_assigned"].reindex(
+                    win_all = classification_results["radius_R_counts_all"]
+                    win_kept = classification_results["radius_R_counts_assigned"].reindex(
                         win_all.index, fill_value=0)
                     win_df = pd.DataFrame({"all": win_all, "kept": win_kept})
-                    win_df.index.name = "window_k"
+                    win_df.index.name = "radius_R"
                     st.dataframe(win_df)
 
                     col1, col2 = st.columns(2)

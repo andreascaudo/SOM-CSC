@@ -13,13 +13,27 @@ import itertools
 # do delate after analysis
 from itertools import product
 from sklearn.metrics import f1_score, precision_recall_fscore_support, confusion_matrix, classification_report
-
+from functools import lru_cache
+from collections import deque
 
 # Global dictionary to store min/max values per feature and metric type
 # Structure: {feature_name: {'single_value': {'min': val, 'max': val}, 'statistical': {'min': val, 'max': val}}}
 feature_scale_ranges = {}
 
 # Function to reset the global scale ranges
+
+
+# even columns (e=True) vs odd columns (e=False)
+II_HEX = ([1, 1, 1, 0, -1, 0],   # Δrow for e=True
+          [0, 1, 0, -1, -1, -1])  # Δrow for e=False
+JJ_HEX = ([1, 0, -1, -1, 0, 1],  # Δcol for e=True
+          [1, 0, -1, -1, 0, 1])  # Δcol for e=False
+
+
+def hex_neighbors_colparity(x, y):
+    e = (y % 2 == 0)  # same as distance_map
+    ii, jj = II_HEX[e], JJ_HEX[e]
+    return [(x+di, y+dj) for di, dj in zip(ii, jj)]
 
 
 def reset_feature_scale_ranges():
@@ -574,9 +588,9 @@ def plot_u_matrix_hex(som, color_type='linear', color_scheme='lightmulti'):
         y=alt.Y('y:Q', sort=alt.EncodingSortField(
             'y', order='descending'), title='',  scale=alt.Scale(domain=[min_y-1, max_y+1])).axis(grid=False, labelPadding=20, tickOpacity=0, domainOpacity=0),
         color=alt.Color(
-            'value:Q', scale=alt.Scale(scheme=color_scheme)),
+            'value:Q', scale=alt.Scale(scheme=color_scheme, reverse=True if color_scheme == 'lightmulti' else False)),
         fill=alt.Fill('value:Q', scale=alt.Scale(type=color_type, domain=(
-            min_value, max_value), scheme=color_scheme),
+            min_value, max_value), scheme=color_scheme, reverse=True if color_scheme == 'lightmulti' else False),
             legend=alt.Legend(
                 orient='bottom',
                 direction='horizontal',
@@ -1629,6 +1643,8 @@ def category_plot_sources_hex(_map, flip=True, custom_colors=None, cluster_mappi
 
     pd_winning_categories = pd.DataFrame(
         winning_categories, columns=['y', 'x', 'feature'])
+    pd_winning_categories["x"] = pd_winning_categories["x"].astype("int64")
+    pd_winning_categories["y"] = pd_winning_categories["y"].astype("int64")
 
     min_x = pd_winning_categories['x'].min()
     max_x = pd_winning_categories['x'].max()
@@ -1832,6 +1848,7 @@ def category_plot_sources_hex(_map, flip=True, custom_colors=None, cluster_mappi
             symbolStrokeWidth=1.0,  # Adjust the stroke width of legend symbols
             # Adjust the size of legend symbols (default is 100)
             symbolSize=size**2
+            # columns=7
         )
 
     st.write('## SOM category plot')
@@ -2578,7 +2595,7 @@ def describe_classified_dataset(dataset_classified, classes=None):
     Summarize a single-pass SOM classification.
 
     dataset_classified: DataFrame with columns
-        id, bmu_x, bmu_y, pred, conf, abstain, support_eff, purity, window_k
+        id, bmu_x, bmu_y, pred, conf, abstain, support_eff, purity, radius_R
     classes: optional list of class names to reindex counts (shows 0s)
 
     Returns dict of pandas objects and scalars.
@@ -2613,12 +2630,12 @@ def describe_classified_dataset(dataset_classified, classes=None):
         conf_assigned = pd.Series(dtype="float64")
         conf_by_class = pd.DataFrame()
 
-    # --- window usage and neighborhood evidence
-    window_all = df["window_k"].value_counts().sort_index(
-    ) if "window_k" in df else pd.Series(dtype="int64")
-    window_assigned = (
-        df.loc[assigned_mask, "window_k"].value_counts().sort_index(
-        ) if "window_k" in df else pd.Series(dtype="int64")
+    # --- radius of neighborhood usage and neighborhood evidence
+    radius_all = df["radius_R"].value_counts().sort_index(
+    ) if "radius_R" in df else pd.Series(dtype="int64")
+    radius_assigned = (
+        df.loc[assigned_mask, "radius_R"].value_counts().sort_index(
+        ) if "radius_R" in df else pd.Series(dtype="int64")
     )
 
     # --- support & purity summaries (kept vs abstained)
@@ -2650,8 +2667,8 @@ def describe_classified_dataset(dataset_classified, classes=None):
         "confidence_by_class": conf_by_class,   # describe() per class
 
         # neighborhood diagnostics
-        "window_k_counts_all": window_all,
-        "window_k_counts_assigned": window_assigned,
+        "radius_R_counts_all": radius_all,
+        "radius_R_counts_assigned": radius_assigned,
         "support_stats_assigned": support_assigned,
         "support_stats_abstained": support_abstain,
         "purity_stats_assigned": purity_assigned,
@@ -3080,6 +3097,78 @@ def get_classification_analysis_tree(
     }
 
 
+def confusion_matrix_per_source_mixed(
+    kept: pd.DataFrame, classes, source_col: str
+):
+    """
+    Per-source summary with the rule:
+
+    - Off-diagonal (i != j): count a source in (Ci, Cj) if AT LEAST ONE valid detection
+      of that source is predicted as Cj.
+    - Diagonal (i == j): count a source in (Ci, Ci) ONLY if ALL valid detections of that
+      source are predicted as Ci (unanimous / all-detections correct).
+
+    kept: dataframe NON-abstained with at least: [source_col, 'true', 'pred']
+    classes: list of class names in desired order
+    source_col: source identifier column (e.g., 'source_id' or 'source_name')
+
+    Returns:
+      - cm_src_df: per-source counts (rows=true, cols=pred)
+      - cm_src_pct_df: row-wise percentages over #sources per true-class
+      - n_sources_by_true: series with #sources per true-class
+    """
+
+    # 1) True label per source (assumed consistent within source)
+    true_by_source = kept.groupby(source_col)["true"].agg(lambda s: s.iloc[0])
+
+    # 2) All predicted labels per source (keep the full list for the diagonal "all detections" rule)
+    preds_by_source = kept.groupby(
+        source_col)["pred"].agg(lambda s: list(s.dropna()))
+
+    cm = np.zeros((len(classes), len(classes)), dtype=int)
+    idx = {c: k for k, c in enumerate(classes)}
+
+    for src in true_by_source.index:
+        t = true_by_source.loc[src]
+        preds = preds_by_source.loc[src]
+
+        if t not in idx or len(preds) == 0:
+            continue
+
+        i = idx[t]
+
+        # --- Diagonal: ALL detections predicted as the true class ---
+        if all(p == t for p in preds):
+            cm[i, i] += 1
+
+        # --- Off-diagonals: AT LEAST ONE detection predicted as the other class ---
+        for p in set(preds):
+            if p == t:
+                continue
+            if p in idx:
+                j = idx[p]
+                cm[i, j] += 1
+
+    cm_src_df = pd.DataFrame(
+        cm,
+        index=[f"T:{c}" for c in classes],
+        columns=[f"P:{c}" for c in classes],
+    )
+
+    # Row-wise denominators (#sources per true class)
+    n_sources_by_true = true_by_source.value_counts().reindex(classes, fill_value=0)
+
+    denom = n_sources_by_true.replace(0, np.nan)  # avoid /0
+    cm_src_pct_df = (cm_src_df.values / denom.values[:, None] * 100.0)
+    cm_src_pct_df = pd.DataFrame(
+        np.round(cm_src_pct_df, 1),
+        index=cm_src_df.index,
+        columns=cm_src_df.columns,
+    ).fillna(0.0)
+
+    return cm_src_df, cm_src_pct_df, n_sources_by_true
+
+
 def get_classification_analysis_from_splits(
     som_map_id_train,     # dict[(i,j)] -> [ids] for TRAIN ids
     som_map_id_val,       # dict[(i,j)] -> [ids] for VAL ids
@@ -3114,9 +3203,8 @@ def get_classification_analysis_from_splits(
     # --------------------- params & classes ---------------------
     params = parameters_classification or {}
     CLASSES = list(params.get("classes", ["QSO", "YSO", "Star"]))
-    WINDOWS = list(params.get("WINDOWS", [3, 5, 7]))
-    WINDOWS = sorted({int(k) for k in WINDOWS if int(k) %
-                     2 == 1 and int(k) >= 3})
+    WINDOWS = list(params.get("WINDOWS", [1, 2, 3]))
+    RADII = sorted({int(R) for R in WINDOWS if int(R) >= 0})
 
     # NEW: distance-kernel width in feature space (0/None -> auto)
     SIGMA_F = params.get("SIGMA_F", 0.0)
@@ -3147,25 +3235,33 @@ def get_classification_analysis_from_splits(
         W, H), f"dim={dim} disagrees with SOM weights ({Wp}x{Hp})"
 
     # --- helper to auto-estimate sigma_f (median adjacent prototype distance) ---
-    def _estimate_sigma_f(weights):
-        Wd, Hd, D = weights.shape
-        d = []
-        # right neighbors
-        diff = weights[1:, :, :] - weights[:-1, :, :]
-        d.append(np.sqrt(np.sum(diff * diff, axis=2)).ravel())
-        # down neighbors
-        diff = weights[:, 1:, :] - weights[:, :-1, :]
-        d.append(np.sqrt(np.sum(diff * diff, axis=2)).ravel())
-        d = np.concatenate(d)
-        d = d[np.isfinite(d) & (d > 0)]
-        return float(np.median(d)) if d.size else 1.0
+    def estimate_sigma_f_hex(Wproto, return_u=True):
+        Wd, Hd, D = Wproto.shape
+        um = np.full((Wd, Hd, 6), np.nan, dtype=float)  # like distance_map
+        all_neighbor_dists = []
 
-    # Estimated SIGMA_F: 0.08860525228369548
-    '''
-    if (SIGMA_F is None) or (float(SIGMA_F) <= 0):
-        SIGMA_F = _estimate_sigma_f(Wproto)
-        print(f"[INFO] Estimated SIGMA_F={SIGMA_F:.6f}")
-    '''
+        for x in range(Wd):
+            for y in range(Hd):
+                w_xy = Wproto[x, y, :]
+                for k, (xi, yj) in enumerate(hex_neighbors_colparity(x, y)):
+                    if 0 <= xi < Wd and 0 <= yj < Hd:
+                        d = float(np.linalg.norm(Wproto[xi, yj, :] - w_xy))
+                        um[x, y, k] = d
+                        if np.isfinite(d) and d > 0:
+                            all_neighbor_dists.append(d)
+
+        U = np.nanmean(um, axis=2)
+        U_norm = U / (np.nanmax(U) + 1e-12)
+
+        sigma_f = float(np.median(all_neighbor_dists)
+                        ) if all_neighbor_dists else 1.0
+        return (sigma_f, U_norm) if return_u else sigma_f
+
+    # Estimated SIGMA_F: 0.1024
+    # if (SIGMA_F is None) or (float(SIGMA_F) <= 0):
+    #     SIGMA_F = estimate_sigma_f_hex(Wproto)
+    # inv_two_sigma2 = 1.0 / (2.0 * (SIGMA_F**2) + 1e-12)
+
     if SIGMA_F > 0:
         SIGMA_F = float(SIGMA_F)
         inv_two_sigma2 = 1.0 / (2.0 * (SIGMA_F ** 2) + 1e-12)
@@ -3206,51 +3302,74 @@ def get_classification_analysis_from_splits(
         hist[int(r.bmu_x), int(r.bmu_y), cls_to_idx[r.label]] += 1.0
     class_counts = hist.sum(axis=(0, 1))
 
-    # --------------------- neighborhood aggregations ---------------------
-    def smooth_box(arr, k=3, mode="edge"):
-        assert k % 2 == 1
-        r = k // 2
-        pad = np.pad(arr, ((r, r), (r, r), (0, 0)), mode=mode)
-        Hh, Ww, Cc = arr.shape
-        out = np.empty_like(arr)
-        for i in range(Hh):
-            for j in range(Ww):
-                out[i, j, :] = pad[i:i+k, j:j+k, :].sum(axis=(0, 1))
+    # --- helpers for odd-r offset layout (i=row=y, j=col=x) ---
+    @lru_cache(maxsize=None)
+    def hex_offsets_by_radius_colparity(R, center_parity):
+        """
+        Return a list of (dx,dy) reachable within hex graph distance <= R
+        using the column-parity neighbor rule (same as distance_map).
+        center_parity: 0 if center y is even, 1 if odd.
+        """
+        # BFS on an infinite grid in *relative* coordinates (dx,dy)
+        # We simulate parity via (center_y + dy) % 2
+        disk = {(0, 0)}
+        q = deque([((0, 0), 0)])
+        while q:
+            (dx, dy), d = q.popleft()
+            if d == R:
+                continue
+            # parity at this step depends on center column parity and dy
+            e = (((dy % 2) == 0) == (center_parity == 0))  # True if even-col
+            ii, jj = II_HEX[e], JJ_HEX[e]
+            for di, dj in zip(ii, jj):
+                ndx, ndy = dx + di, dy + dj
+                if (ndx, ndy) not in disk:
+                    disk.add((ndx, ndy))
+                    q.append(((ndx, ndy), d + 1))
+        return tuple(sorted(disk))
+
+    def hex_disk_sum(arr, R, pad_zero=True):
+        Wd, Hd, K = arr.shape
+        out = np.zeros_like(arr)
+        for x in range(Wd):
+            for y in range(Hd):
+                offs = hex_offsets_by_radius_colparity(
+                    R, center_parity=(y % 2))
+                acc = np.zeros((K,), dtype=np.float64)
+                for dx, dy in offs:
+                    xi, yj = x + dx, y + dy
+                    if 0 <= xi < Wd and 0 <= yj < Hd:
+                        acc += arr[xi, yj, :]
+                    elif not pad_zero:
+                        xi = min(max(xi, 0), Wd-1)
+                        yj = min(max(yj, 0), Hd-1)
+                        acc += arr[xi, yj, :]
+                out[x, y, :] = acc
         return out
 
-    # NEW: feature-distance–weighted box sum (Gaussian in feature space)
-    def weighted_box_sum_feature(arr, k, weights_proto):
-        """arr: (W,H,K) class counts (already reweighted); weights_proto: (W,H,D)"""
-        assert k % 2 == 1
-        r = k // 2
-        Wd, Hd, Kd = arr.shape
-
-        arr_pad = np.pad(arr, ((r, r), (r, r), (0, 0)), mode="edge")
-        I, J = np.meshgrid(np.arange(Wd), np.arange(Hd), indexing="ij")
-        ij = np.stack([I, J], axis=2)                   # (W,H,2)
-        ij_pad = np.pad(ij, ((r, r), (r, r), (0, 0)), mode="edge")
-
-        out = np.empty_like(arr)
-        for i in range(Wd):
-            for j in range(Hd):
-                idx = ij_pad[i:i+k, j:j+k, :]           # (k,k,2)
-                nb_i = idx[..., 0]
-                nb_j = idx[..., 1]
-
-                w_c = weights_proto[i, j, :]           # (D,)
-                w_nb = weights_proto[nb_i, nb_j, :]     # (k,k,D)
-                diff = w_nb - w_c[None, None, :]
-                dist2 = np.sum(diff * diff, axis=2)     # (k,k)
-                ker = np.exp(-dist2 * inv_two_sigma2)   # (k,k)
-
-                block = arr_pad[i:i+k, j:j+k, :]        # (k,k,K)
-                out[i, j, :] = (ker[..., None] * block).sum(axis=(0, 1))
+    def hex_disk_sum_weighted(arr, R, Wproto, inv_two_sigma2):
+        Wd, Hd, K = arr.shape
+        out = np.zeros_like(arr)
+        for x in range(Wd):
+            for y in range(Hd):
+                wc = Wproto[x, y, :]
+                offs = hex_offsets_by_radius_colparity(
+                    R, center_parity=(y % 2))
+                acc = np.zeros((K,), dtype=np.float64)
+                for dx, dy in offs:
+                    xi, yj = x + dx, y + dy
+                    if 0 <= xi < Wd and 0 <= yj < Hd:
+                        diff = Wproto[xi, yj, :] - wc
+                        d2 = float(np.dot(diff, diff))
+                        ker = np.exp(-d2 * inv_two_sigma2)
+                        acc += ker * arr[xi, yj, :]
+                out[x, y, :] = acc
         return out
 
     _SURF_CACHE = {}  # cache per (ALPHA,GAMMA,WINDOWS,SIGMA_F)
 
-    def build_surfaces(ALPHA, GAMMA, windows):
-        key = (float(ALPHA), float(GAMMA), tuple(windows), float(SIGMA_F))
+    def build_surfaces(ALPHA, GAMMA, radii):
+        key = (float(ALPHA), float(GAMMA), tuple(radii), float(SIGMA_F))
         if key in _SURF_CACHE:
             return _SURF_CACHE[key]
 
@@ -3261,12 +3380,13 @@ def get_classification_analysis_from_splits(
         hist_bal = hist * w.reshape(1, 1, -1)
 
         post_list, support_list, purity_list = [], [], []
-        for k in windows:
-            # NEW: use feature-distance kernel if sigma_f > 0, else fallback to box sum
+
+        for R in radii:
             if SIGMA_F > 0:
-                hsum = weighted_box_sum_feature(hist_bal, k, Wproto)
+                hsum = hex_disk_sum_weighted(
+                    hist_bal, R, Wproto, inv_two_sigma2)
             else:
-                hsum = smooth_box(hist_bal, k=k, mode="edge")
+                hsum = hex_disk_sum(hist_bal, R, pad_zero=True)
 
             supp = hsum.sum(axis=2)
             p = (hsum + float(ALPHA))
@@ -3278,7 +3398,7 @@ def get_classification_analysis_from_splits(
         S = {"post_list": post_list,
              "support_list": support_list,
              "purity_list": purity_list,
-             "windows": list(windows)}
+             "radii": list(radii)}
         _SURF_CACHE[key] = S
         return S
 
@@ -3332,6 +3452,7 @@ def get_classification_analysis_from_splits(
         cm = confusion_matrix(kept["true"], kept["pred"], labels=CLASSES)
         cm_df = pd.DataFrame(cm, index=[f"T:{c}" for c in CLASSES], columns=[
                              f"P:{c}" for c in CLASSES])
+
         return {"coverage": cov, "macro_f1": float(np.mean(f1)),
                 "per_class_f1": dict(zip(CLASSES, [float(x) for x in f1])),
                 "n_kept": int(len(kept)), "n_total": int(len(res_df)),
@@ -3350,7 +3471,7 @@ def get_classification_analysis_from_splits(
     t0 = time.time()
     all_runs = []
     for i, p in enumerate(grid_iter(GRID), start=1):
-        S = build_surfaces(p.get("ALPHA", 1.0), p.get("GAMMA", 0.0), WINDOWS)
+        S = build_surfaces(p.get("ALPHA", 1.0), p.get("GAMMA", 0.0), RADII)
         res_val = predict_split(val, p, S, label_col="label")
         m = compute_metrics(res_val)
         all_runs.append({"params": p, **m})
@@ -3370,7 +3491,7 @@ def get_classification_analysis_from_splits(
 
         pbest = best["params"]
         S_best = build_surfaces(pbest.get("ALPHA", 1.0),
-                                pbest.get("GAMMA", 0.0), WINDOWS)
+                                pbest.get("GAMMA", 0.0), RADII)
         res_test = predict_split(test, pbest, S_best, label_col="label")
         mtest = compute_metrics(res_test)
 
@@ -3467,13 +3588,12 @@ def get_classification(
     MARGIN = float(params.get("MARGIN", 0.05))
     ALPHA = float(params.get("ALPHA", 2.0))
     GAMMA = float(params.get("GAMMA", 0.5))
-    WINDOWS = list(params.get("WINDOWS", [3, 5, 7]))
+    WINDOWS = list(params.get("WINDOWS", [1, 2, 3]))
     SIGMA_F = params.get("SIGMA_F", 0.0)  # 0 / None -> auto-estimate
 
     _ = bool(params.get("report_validation", True))  # retained for API compat
 
-    WINDOWS = sorted({int(k) for k in WINDOWS if int(k) %
-                     2 == 1 and int(k) >= 3})
+    RADII = sorted({int(R) for R in WINDOWS if int(R) >= 0})
 
     # --------------------- BMU lookup ---------------------
     id_to_pos_train = {}
@@ -3528,56 +3648,68 @@ def get_classification(
 
     class_counts = hist.sum(axis=(0, 1))
 
-    # --------------------- neighborhood surfaces (ALPHA, GAMMA, WINDOWS) ----------
-    def box_sum(arr, k, pad_mode="edge"):
-        assert k % 2 == 1
-        r = k // 2
-        pad = np.pad(arr, ((r, r), (r, r), (0, 0)), mode=pad_mode)
-        Hh, Ww, Cc = arr.shape
-        out = np.empty_like(arr)
-        for i in range(Hh):
-            for j in range(Ww):
-                out[i, j, :] = pad[i:i+k, j:j+k, :].sum(axis=(0, 1))
+    # --- helpers for odd-r offset layout (i=row=y, j=col=x) ---
+    @lru_cache(maxsize=None)
+    def hex_offsets_by_radius_colparity(R, center_parity):
+        """
+        Return a list of (dx,dy) reachable within hex graph distance <= R
+        using the column-parity neighbor rule (same as distance_map).
+        center_parity: 0 if center y is even, 1 if odd.
+        """
+        # BFS on an infinite grid in *relative* coordinates (dx,dy)
+        # We simulate parity via (center_y + dy) % 2
+        disk = {(0, 0)}
+        q = deque([((0, 0), 0)])
+        while q:
+            (dx, dy), d = q.popleft()
+            if d == R:
+                continue
+            # parity at this step depends on center column parity and dy
+            e = (((dy % 2) == 0) == (center_parity == 0))  # True if even-col
+            ii, jj = II_HEX[e], JJ_HEX[e]
+            for di, dj in zip(ii, jj):
+                ndx, ndy = dx + di, dy + dj
+                if (ndx, ndy) not in disk:
+                    disk.add((ndx, ndy))
+                    q.append(((ndx, ndy), d + 1))
+        return tuple(sorted(disk))
+
+    def hex_disk_sum(arr, R, pad_zero=True):
+        Wd, Hd, K = arr.shape
+        out = np.zeros_like(arr)
+        for x in range(Wd):
+            for y in range(Hd):
+                offs = hex_offsets_by_radius_colparity(
+                    R, center_parity=(y % 2))
+                acc = np.zeros((K,), dtype=np.float64)
+                for dx, dy in offs:
+                    xi, yj = x + dx, y + dy
+                    if 0 <= xi < Wd and 0 <= yj < Hd:
+                        acc += arr[xi, yj, :]
+                    elif not pad_zero:
+                        xi = min(max(xi, 0), Wd-1)
+                        yj = min(max(yj, 0), Hd-1)
+                        acc += arr[xi, yj, :]
+                out[x, y, :] = acc
         return out
 
-    # --------------------- weighted neighborhood surfaces -----------------
-    # We’ll compute a *feature-distance–weighted* window sum for each k.
-    # To mimic your 'edge' padding behavior, we pad both the counts and an index map.
-
-    def weighted_box_sum_feature(arr, k, weights_proto):
-        """arr: (W,H,K) class counts (balanced); weights_proto: (W,H,D)."""
-        assert k % 2 == 1
-        r = k // 2
-        Wd, Hd, Kd = arr.shape
-        D = weights_proto.shape[2]
-
-        # pad counts with 'edge' (replicates border)
-        arr_pad = np.pad(arr, ((r, r), (r, r), (0, 0)), mode="edge")
-
-        # pad an index map so we know which original (i,j) each padded cell mirrors
-        I, J = np.meshgrid(np.arange(Wd), np.arange(Hd), indexing="ij")
-        ij = np.stack([I, J], axis=2)  # (W,H,2)
-        ij_pad = np.pad(ij, ((r, r), (r, r), (0, 0)), mode="edge")
-
-        out = np.empty_like(arr)
-        for i in range(Wd):
-            for j in range(Hd):
-                # kxk block of original indices (taking padding mirroring into account)
-                nb_idx = ij_pad[i:i+k, j:j+k, :]  # (k,k,2)
-                nb_i = nb_idx[..., 0]
-                nb_j = nb_idx[..., 1]
-
-                # prototypes
-                w_c = weights_proto[i, j, :]                        # (D,)
-                w_nb = weights_proto[nb_i, nb_j, :]                 # (k,k,D)
-                diff = w_nb - w_c[None, None, :]
-                dist2 = np.sum(diff * diff, axis=2)                 # (k,k)
-                ker = np.exp(-dist2 * inv_two_sigma2)               # (k,k)
-
-                # counts block and weighted sum
-                block = arr_pad[i:i+k, j:j+k, :]                    # (k,k,K)
-                out[i, j, :] = (ker[..., None] * block).sum(axis=(0, 1))
-
+    def hex_disk_sum_weighted(arr, R, Wproto, inv_two_sigma2):
+        Wd, Hd, K = arr.shape
+        out = np.zeros_like(arr)
+        for x in range(Wd):
+            for y in range(Hd):
+                wc = Wproto[x, y, :]
+                offs = hex_offsets_by_radius_colparity(
+                    R, center_parity=(y % 2))
+                acc = np.zeros((K,), dtype=np.float64)
+                for dx, dy in offs:
+                    xi, yj = x + dx, y + dy
+                    if 0 <= xi < Wd and 0 <= yj < Hd:
+                        diff = Wproto[xi, yj, :] - wc
+                        d2 = float(np.dot(diff, diff))
+                        ker = np.exp(-d2 * inv_two_sigma2)
+                        acc += ker * arr[xi, yj, :]
+                out[x, y, :] = acc
         return out
 
     # tempered class reweighting
@@ -3588,45 +3720,80 @@ def get_classification(
 
     # --------------------- helper: auto-estimate SIGMA_F ------------------
 
-    def _estimate_sigma_f(weights):
-        # median distance among immediate (Manhattan-1) neighbors
-        Wd, Hd, D = weights.shape
-        dists = []
-        # right neighbors
-        diff = weights[1:, :, :] - weights[:-1, :, :]
-        dists.append(np.sqrt(np.sum(diff * diff, axis=2)).ravel())
-        # down neighbors
-        diff = weights[:, 1:, :] - weights[:, :-1, :]
-        dists.append(np.sqrt(np.sum(diff * diff, axis=2)).ravel())
-        d = np.concatenate(dists)
-        d = d[np.isfinite(d) & (d > 0)]
-        if d.size == 0:
-            return 1.0
-        return float(np.median(d))
+    def estimate_sigma_f_hex(Wproto, return_u=True):
+        Wd, Hd, D = Wproto.shape
+        um = np.full((Wd, Hd, 6), np.nan, dtype=float)  # like distance_map
+        all_neighbor_dists = []
 
-    # Estimated SIGMA_F: 0.08860525228369548
+        for x in range(Wd):
+            for y in range(Hd):
+                w_xy = Wproto[x, y, :]
+                for k, (xi, yj) in enumerate(hex_neighbors_colparity(x, y)):
+                    if 0 <= xi < Wd and 0 <= yj < Hd:
+                        d = float(np.linalg.norm(Wproto[xi, yj, :] - w_xy))
+                        um[x, y, k] = d
+                        if np.isfinite(d) and d > 0:
+                            all_neighbor_dists.append(d)
+
+        U = np.nanmean(um, axis=2)
+        U_norm = U / (np.nanmax(U) + 1e-12)
+
+        sigma_f = float(np.median(all_neighbor_dists)
+                        ) if all_neighbor_dists else 1.0
+        return (sigma_f, U_norm) if return_u else sigma_f
+
+    # Estimated SIGMA_F: 0.1024
+
     '''
     if (SIGMA_F is None) or (float(SIGMA_F) <= 0):
-        SIGMA_F = _estimate_sigma_f(Wproto)
-        st.write(f"Estimated SIGMA_F: {SIGMA_F}")
+        SIGMA_F = estimate_sigma_f_hex(Wproto)
+    inv_two_sigma2 = 1.0 / (2.0 * (SIGMA_F**2) + 1e-12)
+    
+    _, U = estimate_sigma_f_hex(Wproto)
+    U2 = som_classification.distance_map(scaling='mean')
+    st.write(U)
+    st.write(U2)
     '''
+
     if SIGMA_F > 0:
         SIGMA_F = float(SIGMA_F)
         inv_two_sigma2 = 1.0 / (2.0 * (SIGMA_F ** 2) + 1e-12)
 
     # precompute per-window sums and posteriors
     hist_s_list, support_list, post_list, purity_list = [], [], [], []
-    for k in WINDOWS:
+    for R in RADII:
         if SIGMA_F > 0:
-            hsum = weighted_box_sum_feature(hist_bal, k, Wproto)
+            hsum = hex_disk_sum_weighted(hist_bal, R, Wproto, inv_two_sigma2)
         else:
-            hsum = box_sum(hist_bal, k, pad_mode="edge")
+            hsum = hex_disk_sum(hist_bal, R)
         hist_s_list.append(hsum)
-        support_list.append(hsum.sum(axis=2))
+        support = hsum.sum(axis=2)
+        support_list.append(support)
         p = (hsum + ALPHA)
         p /= p.sum(axis=2, keepdims=True)
         post_list.append(p)
         purity_list.append(p.max(axis=2))
+
+    # --- helper: edge + truncation flags ---------------------------------
+    def _edge_flags(x, y, R, W, H):
+        """
+        Returns:
+        edge_bmu: True if BMU (x,y) is on the outer ring of the map
+        truncated_R: True if the hex disk of radius R spills outside the map
+                    (i.e., fewer in-bounds cells than the full hex size).
+        """
+        # "edge" = outer perimeter ring
+        edge_bmu = (x == 0) or (x == W - 1) or (y == 0) or (y == H - 1)
+
+        # expected hex-disk size
+        n_expected = 1 + 3 * R * (R + 1)
+
+        # in-bounds count at the chosen radius
+        offs = hex_offsets_by_radius_colparity(R, center_parity=(y % 2))
+        n_in = sum(0 <= x + dx < W and 0 <= y + dy < H for dx, dy in offs)
+
+        truncated_R = (n_in < n_expected)
+        return edge_bmu, truncated_R
 
     # --------------------- predictor (dynamic radius) ---------------------
     def _predict_rows(dfin, require_true=False):
@@ -3639,14 +3806,21 @@ def get_classification(
             while chosen + 1 < len(support_list) and support_list[chosen][x, y] < MIN_SUPPORT:
                 chosen += 1
 
+            edge_bmu, truncated_R = _edge_flags(x, y, RADII[chosen], W, H)
+
+            # if chosen > 0 and not require_true:
+            #    st.write(x, y)
+            #    st.write(chosen)
+            #    st.write(support_list[chosen][x, y])
+
             # no evidence → abstain
             if support_list[chosen][x, y] == 0:
                 if require_true:
-                    rows.append((r.label, None, 0.0, True))
+                    rows.append((r.label, None, 0.0, True, None))
                 else:
                     rows.append((
                         r.get("id", None),
-                        x, y, None, 0.0, True, 0.0, 0.0, WINDOWS[chosen]
+                        x, y, None, 0.0, True, 0.0, 0.0, RADII[chosen], edge_bmu, truncated_R
                     ))
                 continue
 
@@ -3657,6 +3831,7 @@ def get_classification(
             conf = float(p.max())
             pred_idx = int(p.argmax())
             pred = CLASSES[pred_idx]
+            source_name = r.get('name', None)
 
             supp = float(support_list[chosen][x, y])
 
@@ -3679,19 +3854,21 @@ def get_classification(
                 conf = 0.0
 
             if require_true:
-                rows.append((r.label, None if abst else pred, conf, abst))
+                rows.append((r.label, None if abst else pred,
+                            conf, abst, source_name))
             else:
                 rows.append((
                     r.get("id", None),
                     x, y, None if abst else pred, conf, abst,
-                    float(support_list[chosen][x, y]), pur, WINDOWS[chosen]
+                    float(support_list[chosen][x, y]
+                          ), pur, RADII[chosen], edge_bmu, truncated_R
                 ))
         if require_true:
-            return pd.DataFrame(rows, columns=["true", "pred", "conf", "abstain"])
+            return pd.DataFrame(rows, columns=["true", "pred", "conf", "abstain", "source_name"])
         else:
             return pd.DataFrame(rows, columns=[
                 "id", "bmu_x", "bmu_y", "pred", "conf", "abstain",
-                "support_eff", "purity", "window_k"
+                "support_eff", "purity", "radius_R", "edge_bmu", "truncated_R"
             ])
 
     # --------------------- evaluation helper (VAL & TEST) ---------------------
@@ -3707,6 +3884,10 @@ def get_classification(
             cm_df = pd.DataFrame(cm, index=[f"T:{c}" for c in CLASSES], columns=[
                                  f"P:{c}" for c in CLASSES])
 
+            cm_src_df, cm_src_pct_df, n_sources_by_true = confusion_matrix_per_source_mixed(
+                kept=kept, classes=CLASSES, source_col="source_name"
+            )
+
             # --- PRINTS COMMENTED (uncomment to view) ---
             if split_name == "VAL":
                 print(
@@ -3715,6 +3896,8 @@ def get_classification(
                       dict(zip(CLASSES, [float(x) for x in f1])))
                 print("\nConfusion matrix (KEPT only; rows=true, cols=pred):")
                 print(cm_df.to_string())
+                print("\nConfusion matrix per source (KEPT only):")
+                print(cm_src_df.to_string())
             elif split_name == "TEST":
                 print("TEST not printed to ensure no source leakage")
 
@@ -3725,13 +3908,15 @@ def get_classification(
                 "n_kept": int(len(kept)),
                 "n_total": int(len(res)),
                 "confusion_matrix": cm_df.to_dict(),
+                "confusion_matrix_per_source_mixed": cm_src_df.to_dict(),
             }
         else:
             # print(f"[{split_name}] Coverage={cov:.3f} (0/{len(res)}) — no kept predictions; confusion matrix unavailable.")
             metrics = {"coverage": float(cov), "macro_f1": 0.0,
                        "per_class_f1": {c: 0.0 for c in CLASSES},
                        "n_kept": 0, "n_total": int(len(res)),
-                       "confusion_matrix": None}
+                       "confusion_matrix": None,
+                       "confusion_matrix_per_source_mixed": None}
         return metrics
 
     val_metrics = _eval_split(val,  "VAL") if len(val) > 0 else {}
@@ -3770,7 +3955,7 @@ def get_classification(
             "MARGIN": MARGIN,
             "ALPHA": ALPHA,
             "GAMMA": GAMMA,
-            "WINDOWS": WINDOWS,
+            "RADII": RADII,
         },
         "val_metrics": val_metrics,
         "test_metrics": test_metrics,
@@ -4187,8 +4372,20 @@ def plot_empty_hexagons(som, X=None, raw_df=None, main_types=None):
         lambda x: '' if x == 0 else str(x))
 
     # Create legend domain and range - excluding zero (empty hexagons)
-    unique_nonzero_values = sorted(
-        [str(v) for v in hexagon_df['value'].unique() if v > 0])
+    # unique_nonzero_values = sorted(
+    #    [str(v) for v in hexagon_df['value'].unique() if v > 0])
+
+    # convert to numeric
+    s = pd.to_numeric(hexagon_df["value"], errors="coerce")
+    unique_nonzero_values = (
+        s[s > 0]
+        .dropna()
+        .drop_duplicates()
+        .sort_values()
+        .astype(int)           # remove if you need decimals
+        .astype(str)
+        .tolist()
+    )
 
     # Create a base chart for consistent layout
     base = alt.Chart(hexagon_df).encode(
@@ -4217,25 +4414,67 @@ def plot_empty_hexagons(som, X=None, raw_df=None, main_types=None):
     else:
         chart_zeros = None
 
-    if len(hexagon_df[hexagon_df['value'] > 0]) > 0:
+    # Strong, high-saturation palette (20 colors)
+    if len(unique_nonzero_values) <= 15:
+        scientific15 = [
+            "#2682B4",  # deep blue
+            "#FF8747",  # orange
+            "#26A652",  # green
+            "#E04148",  # red
+            "#44AA99",  #
+            "#CC79A7",  # reddish purple
+            "#332288",  # deep indigo
+            "#4D4D4D",  # deep green
+            "#00CED1",  # teal
+            "#88CCEE",  # light blue
+            "#999933",  # olive
+            "#AA4499",  # purple
+            "#882255",  # wine
+            "#E69F00",  # orange (strong but not yellow)
+            "#661100",  # dark brown-red
+        ]
+    else:
+        # heatmap palette of 15 colors from cool green (low value) to hot red (high value) no black
+        scientific15 = [
+            "#1a9850",  # 1 Dark Green (Lowest)
+            "#66bd63",  # 2
+            "#91cf60",  # 3
+            "#d9ef8b",  # 4
+            "#fee08b",  # 5 Soft Yellow
+            "#fdae61",  # 6
+            "#f46d43",  # 7
+            "#d73027",  # 8 Crimson Red (Middle)
+            "#c5252d",  # 9
+            "#b31a33",  # 10 Deep Red
+            "#a10f39",  # 11
+            "#8f043f",  # 12 Magenta-Red
+            "#7d0045",  # 13
+            "#6b004b",  # 14
+            "#540045"  # 15 Deep Maroon/Plum (Highest)
+        ]
+
+    if len(hexagon_df[hexagon_df["value"] > 0]) > 0:
         # Non-zero hexagons (colored by count)
-        chart_nonzeros = base.transform_filter(
-            alt.datum.value > 0
-        ).mark_point(shape=hexagon, size=size**2).encode(
-            color=alt.Color(
-                'value_cat:N',
-                scale=alt.Scale(scheme='category10',
-                                domain=unique_nonzero_values),
-                legend=alt.Legend(title="Number of Main Types")
-            ),
-            fill=alt.Color(
-                'value_cat:N',
-                scale=alt.Scale(scheme='category10',
-                                domain=unique_nonzero_values),
-                legend=alt.Legend(title="Number of Main Types")
-            ),
-            stroke=alt.value('black'),
-            strokeWidth=alt.value(1.0)
+        palette = scientific15[:len(unique_nonzero_values)]
+        strong_scale = alt.Scale(domain=unique_nonzero_values, range=palette)
+
+        chart_nonzeros = (
+            base.transform_filter(alt.datum.value > 0)
+            .mark_point(shape=hexagon, size=size**2)
+            .encode(
+                color=alt.Color(
+                    "value_cat:N",
+                    scale=strong_scale,
+                    legend=alt.Legend(title="Number of Main Types"),
+                ),
+                fill=alt.Color(
+                    "value_cat:N",
+                    scale=strong_scale,
+                    legend=alt.Legend(title="Number of Main Types"),
+                ),
+                stroke=alt.value("black"),
+                strokeWidth=alt.value(1.0),
+            )
         )
 
         # Adjust text size based on SOM dimensions
@@ -4247,8 +4486,8 @@ def plot_empty_hexagons(som, X=None, raw_df=None, main_types=None):
             alt.datum.value > 0
         ).mark_text(
             fontSize=text_size,
-            fontWeight='bold',
-            color='white',
+            # fontWeight='bold',
+            color='black',
             baseline='middle',
             align='center'
         ).encode(
@@ -4570,7 +4809,7 @@ def category_plot_sources_hex_with_size_variation(_map, flip=True, custom_colors
     st.altair_chart(c, use_container_width=True)
 
 
-def create_multi_features_plot(var_map, scaling_options, color_type, color_scheme, feature_name, topology='rectangular', category_map=None, strokeWidth_enhanced=3.0):
+def create_multi_features_plot(var_map, scaling_options, color_type, color_scheme, feature_name, topology='rectangular', category_map=None, strokeWidth_enhanced=3.0, max_clipping=None, min_clipping=None):
     """Create multiple feature plots side by side with shared colorbar"""
     import altair as alt
     import pandas as pd
@@ -4646,6 +4885,8 @@ def create_multi_features_plot(var_map, scaling_options, color_type, color_schem
                         np_map[idx_outer][idx_inner] = np.std(sublist)
                     except TypeError:
                         np_map[idx_outer][idx_inner] = 0
+
+        np_map = np.clip(np_map, min_clipping, max_clipping)
 
         # Convert to DataFrame
         df_map = pd.DataFrame(np_map, columns=range(
