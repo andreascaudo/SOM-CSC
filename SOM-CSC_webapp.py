@@ -1895,8 +1895,25 @@ if st.session_state.SOM_loaded:
                     id_name_type_with_crossmatch = simbad_dataset[[
                         "id", "name", st.session_state.simbad_type]]
 
+                    st.write(
+                        f"Size of dataset_toclassify_with_crossmatch: {len(dataset_toclassify_with_crossmatch)}")
+                    # head of dataset_toclassify_with_crossmatch
+                    st.write(
+                        f"Head of dataset_toclassify_with_crossmatch: {dataset_toclassify_with_crossmatch.head()}")
+                    # tail of dataset_toclassify_with_crossmatch
+                    st.write(
+                        f"Tail of dataset_toclassify_with_crossmatch: {dataset_toclassify_with_crossmatch.tail()}")
+
                     dataset_toclassify_with_crossmatch = pd.merge(
                         dataset_toclassify_with_crossmatch, id_name_type_with_crossmatch, on="id", how="left")
+
+                    #
+                    # head of dataset_toclassify_with_crossmatch after merge
+                    st.write(
+                        f"Head of dataset_toclassify_with_crossmatch after merge: {dataset_toclassify_with_crossmatch.head()}")
+                    # tail of dataset_toclassify_with_crossmatch after merge
+                    st.write(
+                        f"Tail of dataset_toclassify_with_crossmatch after merge: {dataset_toclassify_with_crossmatch.tail()}")
 
                     y_for_split = dataset_toclassify_with_crossmatch[st.session_state.simbad_type].copy(
                     )
