@@ -1953,6 +1953,15 @@ if st.session_state.SOM_loaded:
                     # Filter each dataset to keep only rows with TARGET classes
                     train = train[train[st.session_state.simbad_type].isin(
                         TARGET)].copy()
+
+                    st.write(f"Size of train: {len(train)}")
+                    # info on train
+                    st.write(f"Info on train: {train.info()}")
+                    st.write(f"Describe train: {train.describe()}")
+                    st.write(f"Head train: {train.head()}")
+                    st.write(f"Tail train: {train.tail()}")
+                    st.write(f"Sample train: {train.sample(10)}")
+
                     val = val[val[st.session_state.simbad_type].isin(
                         TARGET)].copy()
                     test = test[test[st.session_state.simbad_type].isin(
