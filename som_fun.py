@@ -4417,10 +4417,10 @@ def plot_empty_hexagons(som, X=None, raw_df=None, main_types=None):
     # Strong, high-saturation palette (20 colors)
     if len(unique_nonzero_values) <= 15:
         scientific15 = [
-            "#2682B4",  # deep blue
-            "#FF8747",  # orange
-            "#26A652",  # green
-            "#E04148",  # red
+            "#1a9850",  # "#2682B4",  # deep blue
+            "#fee08b",  # "#FF8747",  # orange
+            "#f46d43",  # "#26A652",  # green
+            "#b31a33",  # "#E04148",  # red
             "#44AA99",  #
             "#CC79A7",  # reddish purple
             "#332288",  # deep indigo
