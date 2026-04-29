@@ -1,5 +1,6 @@
 from sklearn.preprocessing import MinMaxScaler
 from collections import defaultdict
+import sklearn
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.metrics import classification_report, confusion_matrix
 import time
