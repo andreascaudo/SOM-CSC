@@ -1898,6 +1898,10 @@ if st.session_state.SOM_loaded:
                     dataset_toclassify_with_crossmatch = pd.merge(
                         dataset_toclassify_with_crossmatch, id_name_type_with_crossmatch, on="id", how="left")
 
+                    # print all IDs
+                    st.write(f"All IDs")
+                    st.write(dataset_toclassify_with_crossmatch["id"].unique())
+
                     y_for_split = dataset_toclassify_with_crossmatch[st.session_state.simbad_type].copy(
                     )
                     # NOTE (reproducibility): we keep the *original* class names ONLY for the fold split.
