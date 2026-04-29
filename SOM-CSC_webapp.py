@@ -1899,8 +1899,6 @@ if st.session_state.SOM_loaded:
                         dataset_toclassify_with_crossmatch, id_name_type_with_crossmatch, on="id", how="left")
 
                     # print all IDs
-                    st.write(f"All IDs")
-                    st.write(dataset_toclassify_with_crossmatch["id"].unique())
                     st.write(sklearn.__version__)
 
                     y_for_split = dataset_toclassify_with_crossmatch[st.session_state.simbad_type].copy(
