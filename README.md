@@ -2,15 +2,21 @@
 
 A web application for exploring and analyzing the Chandra Source Catalog (CSC) using Self-Organizing Maps (SOM). This application provides a user-friendly interface for training, visualizing, and interpreting SOMs with astronomical data.
 
+This repository contains the source code of the web application described in
+Scaudo et al., "Self-Organizing Maps for the Exploration and Classification of
+X-Ray Sources in the Chandra Source Catalog".
+
+- Web application: https://somcsc.streamlit.app
+- Classification tables: https://doi.org/10.5281/zenodo.20932854
+
 ## Overview
 
 SOM-CSC is a Streamlit-based web application that allows astronomers and researchers to:
 
 1. Explore CSC data using the powerful Self-Organizing Maps technique
 2. Train custom SOMs with different features and hyperparameters
-3. Select different datasets
-4. Visualize data patterns and clusters in an interactive interface
-5. Classify astronomical sources based on their characteristics
+3. Visualize data patterns and clusters in an interactive interface
+4. Classify astronomical sources based on their characteristics
 
 ## Features
 
@@ -46,10 +52,11 @@ SOM-CSC is a Streamlit-based web application that allows astronomers and researc
 - Save and load trained SOM models
 - Download models for offline analysis
 
-### Source Classification
-- Source type classification based on SOM mapping
-- Configurable classification parameters
-- 2 type of classification methods
+### Source Classification (SOMClassifier)
+- Detection-level classification on a dedicated SOM, with a source-grouped train/validation/test split
+- Neighbourhood pooling on the hexagonal grid, weighted by prototype similarity, with Laplace smoothing and class reweighting
+- Abstention controlled by support, purity and margin thresholds
+- Validation and test metrics, and a downloadable table of predictions
 
 ## Technical Details
 

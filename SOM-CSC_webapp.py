@@ -8,7 +8,6 @@ import glob
 import os
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score
 
 st.set_page_config(
     page_title="SOM CSC",
@@ -109,28 +108,8 @@ if 'custom_colors' not in st.session_state:
 if 'initialized_colors' not in st.session_state:
     st.session_state.initialized_colors = set()
 
-# Dataset selection in sidebar - must be early to affect session state initialization
-st.sidebar.header('Dataset Selection')
-dataset_version = st.sidebar.selectbox(
-    'Dataset version', ['CSC 2.1.1', 'CSC 2.1.1 clean'], index=0, key='dataset_selector')
-
-if dataset_version == 'CSC 2.1.1':
-    raw_dataset_path = './data/csc211_mastertable_clean_observationlevel_COMPLETE_xmatchSimbad1arcsec_log_norm_id_ClassAgg/'
-elif dataset_version == 'CSC 2.1.1 clean':
-    raw_dataset_path = './data/csc212_mastertable_clean_log_norm_id/'
-
-# Check if dataset has changed and clear relevant session state
-if 'current_dataset' not in st.session_state:
-    st.session_state.current_dataset = dataset_version
-elif st.session_state.current_dataset != dataset_version:
-    # Dataset changed - clear data-related session state
-    keys_to_clear = ['raw_df', 'full_df', 'df', 'full_df_index',
-                     'df_index', 'df_to_norm', 'all_original_features']
-    for key in keys_to_clear:
-        if key in st.session_state:
-            del st.session_state[key]
-    st.session_state.current_dataset = dataset_version
-    st.rerun()
+# ACIS-SV-CSC dataset (CSC 2.1.1) used in the paper
+raw_dataset_path = './data/csc211_mastertable_clean_observationlevel_COMPLETE_xmatchSimbad1arcsec_log_norm_id_ClassAgg/'
 
 # Initialize session state for dataframes
 if 'raw_df' not in st.session_state:
@@ -242,7 +221,12 @@ som_model = st.sidebar.file_uploader(
 # button to load the SOM model
 
 if som_model is not None:
-    file = pickle.load(som_model)
+    try:
+        file = load_som_model(som_model)
+    except Exception as e:
+        st.sidebar.error(
+            f"This file is not a SOM model saved by this application: {e}")
+        st.stop()
     st.session_state.som, features = file[0], file[1]
     st.session_state.selected_features = features
     # get topology
@@ -283,10 +267,6 @@ else:
 
     # Fix the default features selection to avoid KeyError
     default_features = features_for_selection.copy()
-
-    default = ['neoYSOs', 'neoAGNs', 'Binaries', 'Stars'] if class_or_main_type else [
-        'YSO', 'AGN', 'Binaries', 'Stars']
-    # default = ['YSO']
 
     features = st.sidebar.multiselect(
         'Features', features_for_selection, default_features, help='Select the features to be used for training the SOM.')
@@ -392,9 +372,9 @@ else:
         quantization_error = st.session_state.som.quantization_error(X)
         st.write(f"**Quantization Error:** {quantization_error:.4f}")
         # Display topographic error based on topology
-        if topology == "rectangular":
+        if st.session_state.som.topology == "rectangular":
             topographic_error = st.session_state.som.topographic_error(X)
-        elif topology == "hexagonal":
+        elif st.session_state.som.topology == "hexagonal":
             topographic_error = topographic_error_hex(
                 st.session_state.som, X)
         st.write(
@@ -648,7 +628,7 @@ if st.session_state.SOM_loaded:
                             st.write(
                                 "**Note:** String features are displayed with the most common value per neuron.")
 
-                        if topology == 'rectangular':
+                        if st.session_state.som.topology == 'rectangular':
                             if is_string(var):
                                 category_plot_sources(var)
                             else:
@@ -1751,7 +1731,7 @@ if st.session_state.SOM_loaded:
                         create_multi_features_plot(
                             var, scaling_options, type_option, color_scheme,
                             uploaded_feature_name, st.session_state.som.topology,
-                            max_clipping, min_clipping
+                            max_clipping=feature_data.max(), min_clipping=feature_data.min()
                         )
                 else:
                     st.error(
@@ -1775,7 +1755,7 @@ if st.session_state.SOM_loaded:
                     st.markdown(
                         """
                 - **BMU lookup:** each detection is mapped to its Best Matching Unit (BMU) on the SOM.
-                - **Dynamic neighborhood:** we look around the BMU with growing windows (e.g. 3×3, 5×5, 7×7) until we have **enough support**.
+                - **Dynamic neighborhood:** we look around the BMU with hexagonal neighborhoods of growing radius (e.g. 1, 2, 3, 4) until we have **enough support**. Each neuron is weighted by the similarity of its prototype to the BMU prototype.
                 - **Probabilities:** from the neighborhood counts we compute class posteriors with mild **class reweighting** (optional) and **Laplace smoothing**.
                 - **Decision with abstain:** we assign the top class only if:
                     - support ≥ **MIN_SUPPORT**
@@ -1791,7 +1771,8 @@ if st.session_state.SOM_loaded:
                 - **MIN_SUPPORT**: minimum effective examples in the chosen window  
                 - **MIN_PURITY**: minimum top-class posterior  
                 - **MARGIN**: minimum gap between top-2 posteriors  
-                - **WINDOWS**: neighborhood sizes tried in order (e.g. `[3,5,7]`)  
+                - **WINDOWS**: neighborhood radii tried in order (e.g. `[1,2,3,4]`)  
+                - **SIGMA_F**: width of the prototype-similarity kernel (0 = all neurons in the neighborhood count equally)  
                 - **ALPHA** (Laplace), **GAMMA** (class reweighting)
                         """
                     )
@@ -1799,22 +1780,21 @@ if st.session_state.SOM_loaded:
                     st.write("### Output columns (per detection)")
                     st.markdown(
                         """
-                - **pred** (class) · **conf** (top-class probability) · **abstain** (True/False)  
-                - **bmu_x, bmu_y** (BMU coords) · **support_eff** (evidence) · **purity** (top-class prob) · **window_k** (window used)
+                - **id** · **pred** (class) · **conf** (top-class probability) · **abstain** (True/False) · **source name**  
+                - **bmu_x, bmu_y** (BMU coords) · **edge_bmu** (BMU on the border of the map) · **truncated_R** (neighborhood cut by the border)
                         """
                     )
 
                     st.write("### Upload format (CSV)")
                     st.markdown(
                         """
-                The file must be a **.csv** with the **same features used to train the SOM**, one row per detection.  
-                Include an **`id`** column if you want to keep identifiers in the outputs; no class column is needed.
+                The file must be a **.csv** with one row per detection and one column for each **feature used to train the SOM**, named as the feature and containing the catalog values (the log transformation and the normalization are applied by the app).  
+                Other columns are ignored and no class column is needed. In the output, **id** is the row number of the uploaded file (starting from 0).
                         """
                     )
                     st.code(
-                        "id,f1,f2,f3,...,f11\n"
-                        "obj_001,0.12,1.5,3.4,...,0.07\n"
-                        "obj_002,0.08,1.2,3.1,...,0.05\n"
+                        "hard_hm,hard_hs,hard_ms,powlaw_gamma,var_prob_b,var_prob_s,var_prob_h,bb_kt,var_ratio_b,var_ratio_h,var_ratio_s\n"
+                        "-0.05,-0.28,-0.23,1.92,0.06,0.41,0.24,0.85,0.31,0.52,0.47\n"
                         "...\n",
                         language="text",
                     )
@@ -1828,10 +1808,10 @@ if st.session_state.SOM_loaded:
                 # Set parameters
 
                 main_type_counts = main_type.value_counts()
-                default_main_type_counts = []
-                for default in default:
-                    default_main_type_counts.append(
-                        f"{default} [{main_type_counts[default]}]")
+                default_classes = ['neoYSOs', 'neoAGNs', 'Binaries', 'Stars'] if class_or_main_type else [
+                    'YSO', 'AGN', 'Star']
+                default_main_type_counts = [
+                    f"{c} [{main_type_counts[c]}]" for c in default_classes]
                 sorted_main_type = [f"{name} [{count}]" for name,
                                     count in main_type_counts.items()]
 
@@ -1874,6 +1854,8 @@ if st.session_state.SOM_loaded:
                                 # Assuming a new function 'validate_and_load_dataset' in som_fun.py
                                 dataset_toclassify = validate_and_load_dataset_class(
                                     uploaded_file, features).reset_index().rename(columns={"index": "id"})
+                                # ids of the uploaded rows must not collide with the catalogue ids
+                                dataset_toclassify["id"] += st.session_state.raw_df["id"].max() + 1
                                 feature_to_trans_and_norm = [
                                     'powlaw_gamma', 'bb_kt', 'var_ratio_b', 'var_ratio_h', 'var_ratio_s']
                                 dataset_toclassify[feature_to_trans_and_norm] = transform_and_normalize(
@@ -2018,8 +2000,8 @@ if st.session_state.SOM_loaded:
                     som_map_id_val = download_activation_response(
                         st.session_state.som_classification, val_x_Y_index)
 
-                    # DEBUG
-                    #
+                    # Hyperparameter tuning procedure of Section 5.3.1 of the paper
+                    # (grid search on the validation split for each sigma_f); disabled in the app.
 
                     # sigma_f = [0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07,
                     #            0.08, 0.0886, 0.09, 0.094, 0.1, 0.1024, 0.12, 0.13, 0.14]
@@ -2049,6 +2031,10 @@ if st.session_state.SOM_loaded:
                             zip(st.session_state.raw_df['id'], st.session_state.raw_df['name']))
                         dataset_classified['source name'] = dataset_classified['id'].map(
                             id_to_source)
+
+                    if dataset_choice == 'Upload a new dataset':
+                        # back to the row number of the uploaded file
+                        dataset_classified['id'] -= st.session_state.raw_df['id'].max() + 1
 
                     st.session_state.dataset_classified = dataset_classified[['id', 'bmu_x', 'bmu_y', 'pred',
                                                                               'conf', 'abstain', 'source name', 'edge_bmu', 'truncated_R']]
