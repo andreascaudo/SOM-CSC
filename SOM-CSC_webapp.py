@@ -100,6 +100,13 @@ st.write("""
 # Exploring the Chandra Source Catalog (CSC) using Self-Organizing Maps (SOM)
 """)
 
+# Paper reference, shown at the top of the sidebar
+st.sidebar.info(
+    "The default parameters are the ones needed to reproduce the results of "
+    "Scaudo, A., D'Abrusco, R., et al. 2026, *Self-Organizing Maps for the Exploration and "
+    "Classification of X-Ray Sources in the Chandra Source Catalog*, "
+    "[arXiv:2611.16539](https://arxiv.org/abs/2611.16539).")
+
 # Initialize color customization state if not already present
 if 'custom_colors' not in st.session_state:
     st.session_state.custom_colors = {}
